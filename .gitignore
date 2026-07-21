@@ -1,0 +1,22 @@
+# LaTeX auxiliary and build files (main paper and supplementary material)
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.xdv
+
+# Generated main/supplementary PDFs in the repository root
+# (keep PDF figures under Figures/)
+/*.pdf
