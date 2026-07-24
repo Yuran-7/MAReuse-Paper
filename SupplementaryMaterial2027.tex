@@ -85,25 +85,30 @@ This supplementary material provides additional technical details, experimental 
 
 \section{Additional Method Details}
 
-This section develops MAReuse-D from individual data structures to the complete decoding loop. We first describe online construction of the local suffix automaton, then define its runtime retrieval and update operations. We next introduce the role-aware global span index. Finally, we show how local retrieval, global retrieval, and the logits-tree fallback are composed during decoding, followed by their memory costs.
+This section presents implementation details of MAReuse-D. We first describe online construction of the local suffix automaton, then define its runtime retrieval and update operations. We next introduce the role-aware global index. Finally, we show how local retrieval, global retrieval, and the logits-tree fallback are composed during decoding, followed by their memory costs.
 
 \subsection{Suffix Automaton Indexing}
 
 A suffix automaton (SAM) is a compact deterministic automaton that represents every substring of a sequence. A transition appends one token to the current match, while a suffix link connects a state to its longest proper suffix. Despite representing all substrings, a SAM built from $n$ tokens contains only $O(n)$ states and can be constructed online.
 
-This adaptive matching is the main reason we use a SAM. Within the same sample, responses from different agents often exhibit greater reuse potential through partially shared local contexts, making precise matching with a dynamically selected suffix length particularly important. A SAM captures such variable overlap by tracking the longest suffix available in the history and following suffix links only when backoff is needed, whereas a fixed-anchor index retains a consistent context length for global matching.
+The main reason we use a SAM is its ability to adapt the matched context length to each query. Responses from different agents within the same sample often share only partial local contexts. By tracking the longest suffix present in the history and following suffix links when backoff is needed, the SAM preserves the longest valid match, whereas global matching relies on a small set of fixed anchor lengths and may miss reusable continuations.
 
 Figure~\ref{fig:sam-example} illustrates the mechanism on a short
-sequence $T=\texttt{ABABC}$. The substrings \texttt{B} and \texttt{AB}
-share state $s_2$ because both have the same end-position set
-$\{2,4\}$. When the current context ends with \texttt{A} and the next
+sequence $T=\texttt{ABABC}$. The end-position set of a substring contains
+all positions in $T$ at which an occurrence of that substring ends.
+The substrings \texttt{B} and \texttt{AB} share state $s_2$ because both have the same end-position set
+$\{2,4\}$. Overall, $T$ contains 12 distinct nonempty substrings, which
+the SAM represents with only six states. When the current context ends
+with \texttt{A} and the next
 candidate token is \texttt{B}, the query reaches $s_2$ with match
 length 2. This match corresponds to both occurrences of \texttt{AB},
 which end at positions 2 and 4 and are followed by \texttt{ABC} and
 \texttt{C}, respectively. Since retrieval uses
 $S[s_2].\mathrm{minEnd}=2$ as the representative ending position, it
 selects the first occurrence of \texttt{AB} and reads its following
-tokens \texttt{ABC} as the continuation.
+tokens \texttt{ABC} as the continuation. Algorithm~\ref{alg:sam-build}
+summarizes the online extension procedure used to construct the SAM one
+token at a time.
 
 \begin{figure}[t]
     \centering
@@ -150,11 +155,9 @@ tokens \texttt{ABC} as the continuation.
 
 \subsection{SAM-Based Local Draft Retrieval}
 
-During decoding, the cursor $(s,\ell)$ denotes the longest suffix of the current context found in the history: $s$ is its SAM state and $\ell$ its actual length. Both are needed because one state can represent several lengths. \textsc{Transfer} consumes a confirmed token, following suffix links and retrying the same token on a mismatch. The cursor differs from $last$, which \textsc{Extend} uses to track the complete indexed history.
+Algorithm~\ref{alg:sam-query} summarizes the local retrieval and online update procedure. During decoding, the cursor $(s,\ell)$ denotes the longest suffix of the current context found in the history: $s$ is its SAM state and $\ell$ its actual length. Both are needed because one state can represent several lengths. Given a token $z$, \textsc{Transfer} updates the cursor to the longest suffix ending in $z$ that occurs in the indexed history. If the current state has no transition for $z$, it follows suffix links to shorter suffixes and tests $z$ again. In contrast, $last$ is the construction pointer maintained by \textsc{Extend}: it identifies the SAM state representing the complete indexed history and serves as the starting point when a new token is inserted.
 
-For a proposed token $z$, \textsc{Retrieve} applies \textsc{Transfer} to a temporary cursor $(q,m)$. If $m<\ell_{\min}$, it returns no draft. Otherwise, $S[q].\mathrm{minEnd}$ locates a representative occurrence from which up to $K$ continuation tokens are read; retrieval backs off if too few remain. \textsc{Retrieve} is read-only, and the target model verifies its draft.
-
-After verification, \textsc{Commit} processes accepted tokens in order: each advances the cursor through \textsc{Transfer} before insertion through \textsc{Extend}, preventing self-match. The cycle is \emph{retrieve $\rightarrow$ verify $\rightarrow$ transfer $\rightarrow$ extend}.
+To retrieve a draft, \textsc{Retrieve} passes $z$ and the current cursor to \textsc{Transfer}, storing the result in a temporary cursor $(q,m)$ so that the original cursor remains unchanged. It returns no draft if the resulting match length $m$ is below $\ell_{\min}$. Otherwise, $S[q].\mathrm{minEnd}$ locates a representative occurrence from which up to $K$ continuation tokens are read. The target model subsequently verifies the retrieved draft. After verification, \textsc{Commit} processes accepted tokens in order: each advances the cursor through \textsc{Transfer} before insertion through \textsc{Extend}, preventing self-match. The cycle is \emph{retrieve $\rightarrow$ verify $\rightarrow$ transfer $\rightarrow$ extend}.
 
 \begin{figure}[t]
 \begin{algbox}{Online SAM Retrieval and Update}
@@ -202,28 +205,28 @@ After verification, \textsc{Commit} processes accepted tokens in order: each adv
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.98\textwidth]{"Figures/global index version 2.pdf"}
-    \caption{Organization and pruning of the role-aware global span index. Queries select a role, back off from longer to shorter anchors, and draft from the latest span associated with the matched anchor.}
+    \caption{Organization and pruning of the role-aware global index. Queries select a role, back off from longer to shorter anchors, and draft from the latest span associated with the matched anchor.}
     \label{fig:global-span-index}
 \end{figure*}
 
-\subsection{Role-Aware Global Span Index}
+\subsection{Role-Aware Global Index}
 
-To reuse continuations across samples, MAReuse-D maintains a role-aware global span index. The index is organized as $G[r][L][a] \rightarrow \mathcal{Q}$, where $r$ is an agent role, $L\in\{8,12,24\}$ is the anchor length, $a$ is an exact token anchor, and $\mathcal{Q}$ is a bounded deque of continuation entries. Each entry stores a tuple $(u,b,e)$ pointing to an eligible continuation $H_u[b:e]$ in source history $u$, with inclusive start $b$ and exclusive end $e$. This representation stores only a source identifier and two offsets rather than duplicating continuation tokens. When the same anchor is observed again, the new entry is inserted into the deque, and the deque is trimmed to a fixed maximum size.
+To reuse continuations across samples, MAReuse-D maintains a role-aware global index implemented as a hash-based span index. The index is organized as $G[r][L][a] \rightarrow \mathcal{L}$, where $r$ is an agent role, $L\in\{8,12,24\}$ is the anchor length, $a$ is an exact token anchor, and $\mathcal{L}$ is a bounded list of continuation entries. Each entry stores a tuple $(u,b,e)$ pointing to an eligible continuation $H_u[b:e]$ in source history $u$, with inclusive start $b$ and exclusive end $e$. This representation stores only a source identifier and two offsets rather than duplicating continuation tokens. When the same anchor is observed again, the new entry is added to the list, which is kept at a fixed maximum size.
 
-At lookup, the current role selects its partition and the index tries longer anchors first. For a matched anchor, MAReuse-D ranks the entries in its deque using lightweight evidence such as few-shot priority, past hit count, recency, and available continuation length, and returns the selected referenced span subject to the draft budget for $L$. The index also supports TTL-based cold-anchor pruning as an optional memory-control mechanism: singleton anchors that survive for a configured number of completed samples without being hit can be removed, while few-shot anchors and multi-entry deques are retained. Unless otherwise specified, our main experiments use the unpruned index to isolate the effect of cross-sample reuse from memory-reduction heuristics.
+At lookup, the current role selects its partition and the index tries longer anchors first. For a matched anchor, MAReuse-D ranks the entries in its list using lightweight evidence such as few-shot priority, past hit count, recency, and available continuation length, and returns the selected referenced span subject to the draft budget for $L$. The index also supports TTL-based cold-anchor pruning as an optional memory-control mechanism: singleton anchors that survive for a configured number of completed samples without being hit can be removed, while few-shot anchors and multi-entry lists are retained. Unless otherwise specified, our main experiments use the unpruned index to isolate the effect of cross-sample reuse from memory-reduction heuristics.
 
 The index is initially empty and persists across completed samples. New spans become visible only after their source sample finishes, so retrieval uses model-generated text from prior samples but never reference answers, correctness labels, or current/future information. Every retrieved span is only a proposal and must still be verified by the target model.
 
 \subsection{Collaborative Decoding Procedure}
 
-Algorithm~\ref{alg:collab-decoding} composes the preceding components. At each step, MAReuse-D first calls local \textsc{Retrieve} from Algorithm~\ref{alg:sam-query}; a match is valid only if it contains at least $\ell_{\min}$ exact tokens. Otherwise, it queries the role-specific global index using the longest available exact anchor. If neither linear source succeeds, it falls back to a logits-cache tree. This selection is deterministic and does not use a learned confidence model. Every selected draft is verified by the target model.
+Algorithm~\ref{alg:collab-decoding} composes the preceding components. At each step, MAReuse-D first calls local \textsc{Retrieve} from Algorithm~\ref{alg:sam-query}; a match is valid only if it contains at least $\ell_{\min}$ exact tokens. Otherwise, it queries the role-aware global index using the longest available exact anchor. If neither linear source succeeds, it falls back to a logits-cache tree. This selection is deterministic and does not use a learned confidence model. Every selected draft is verified by the target model.
 
 The distinction between proposal and commitment is central: a retrieval hit only proposes tokens for verification, and rejected tokens never enter any reuse structure. Posterior-accepted tokens immediately update the sample-scoped SAM and logits cache, whereas their global span references become visible only after the sample completes. This causal schedule supports three complementary forms of reuse. The local SAM captures cross-agent text overlap within the current input, the global index retrieves role-consistent spans from completed inputs, and the logits cache reuses discarded target-model candidate distributions as a role-agnostic fallback when no reliable exact span is available.
 
 \begin{algbox}{Collaborative Decoding with Linear and Tree Drafts}
 \label{alg:collab-decoding}
 \textbf{function} DecodeWithReuse\\
-\algindent \textbf{Input:} target model $M$, local SAM $S_{\mathrm{loc}}$, role-aware index $G$, logits cache $C$, agent role $r$\\
+\algindent \textbf{Input:} target model $M$, local SAM $S_{\mathrm{loc}}$, role-aware global index $G$, logits cache $C$, agent role $r$\\
 \algindent \textbf{while} stopping condition is not met \textbf{do}\\
 	\algindenttwo $d \leftarrow$ local SAM draft from $S_{\mathrm{loc}}$\\
 \algindenttwo \textbf{if} $d$ is empty or its exact match is shorter than $\ell_{\min}$ \textbf{then}\\
@@ -268,17 +271,17 @@ We compare MAReuse against performance bounds and state-of-the-art reuse methods
 
 \noindent\textbf{Prefill reuse methods.}
 \begin{itemize}
-    \item \textbf{CacheBlend}~\citep{yao2025cacheblend}: a selective recomputation method that reuses aligned KV caches and corrects tokens with large shallow-layer KV deviations. Following the common setting, we select the top 20\% reused tokens for recomputation.
-    \item \textbf{EPIC}~\citep{hu2025epic}: a position-independent context caching method that recomputes a fixed prefix window in each chunk. We implement the LegoLink correction with chunk size 16.
-    \item \textbf{RelayCaching}~\citep{geng2026relaycaching}: a decode-to-prefill KV reuse method that transfers KV caches produced during upstream decoding and rectifies them with profiled layer-range and sparse-token correction. We use the recommended hyperparameters from the paper.
-    \item \textbf{KVCOMM}~\citep{ye2025kvcomm}: a multi-agent KV communication framework that estimates prefix-conditioned KV offsets through similarity retrieval from role-specific anchor pools. We follow the default configuration of the original method and use an anchor pool size of 20 per agent role.
+    \item \textbf{CacheBlend}~\citep{DBLP:conf/eurosys/YaoLLRCZD0J25}: a selective recomputation method that reuses aligned KV caches and corrects tokens with large shallow-layer KV deviations. Following the common setting, we select the top 20\% reused tokens for recomputation.
+    \item \textbf{EPIC}~\citep{DBLP:conf/icml/HuHWWHZFCS025}: a position-independent context caching method that recomputes a fixed prefix window in each chunk. We implement the LegoLink correction with chunk size 16.
+    \item \textbf{RelayCaching}~\citep{DBLP:journals/corr/abs-2603-13289}: a decode-to-prefill KV reuse method that transfers KV caches produced during upstream decoding and rectifies them with profiled layer-range and sparse-token correction. We use the recommended hyperparameters from the paper.
+    \item \textbf{KVCOMM}~\citep{ye2026kvcomm}: a multi-agent KV communication framework that estimates prefix-conditioned KV offsets through similarity retrieval from role-specific anchor pools. We follow the default configuration of the original method and use an anchor pool size of 20 per agent role.
     \item \textbf{MAReuse-P}: our method with only filter-layer corrected prefill reuse enabled. We use layer 6 for Llama-3.1-8B-Instruct and layer 7 for Qwen2.5-Coder-7B-Instruct. We use the same dataset-level ratio as the target cardinality for both the layer-1 initial selection and the filter-layer reselection; the identities of the selected tokens may change after filtering. Decoding remains standard autoregressive decoding, isolating the prefill component.
 \end{itemize}
 
 \noindent\textbf{Decoding reuse methods.}
 \begin{itemize}
-    \item \textbf{Token Recycling}~\citep{luo2025tokenrecycling}: a training-free speculative decoding method that stores top-$k$ candidate tokens from prior decoding steps and retrieves a logits tree for tree-attention verification. Following the original paper, we use its fixed 81-node tree template.
-    \item \textbf{SAM-Decoding}~\citep{hu2025sam}: a suffix-automaton-based speculative decoding method that retrieves repeated suffix continuations as linear drafts. Following the original paper, we use its 61-token draft budget.
+    \item \textbf{Token Recycling}~\citep{DBLP:conf/acl/LuoWZZZ0X25}: a training-free speculative decoding method that stores top-$k$ candidate tokens from prior decoding steps and retrieves a logits tree for tree-attention verification. Following the original paper, we use its fixed 81-node tree template.
+    \item \textbf{SAM-Decoding}~\citep{DBLP:conf/acl/HuWZZLCZ25}: a suffix-automaton-based speculative decoding method that retrieves repeated suffix continuations as linear drafts. Following the original paper, we use its 61-token draft budget.
     \item \textbf{RACER}~\citep{zhang2026racer}: a retrieval-enhanced speculative decoding method that combines logits-tree candidates with Aho-Corasick matching. Following the original paper, we use a 61-token draft budget and an Aho-Corasick automaton budget of 10,000 nodes.
 	\item \textbf{MAReuse-D}: our method with only collaborative speculative decoding enabled, with normal prefill to isolate decoding acceleration. Local reuse uses a dynamic suffix automaton with minimum match length 5 and draft length up to 40. Global reuse uses role-aware anchors of lengths $\{8,12,24\}$, stores eligible continuation references, addresses up to 256 tokens per reference, and uses draft caps of 64, 128, and 256 tokens, respectively. The main experiments use the unpruned global index; the pruning rule described in the method details is an optional memory-control mechanism. If retrieval fails, the logits-cache fallback uses the fixed 81-node tree during the first 50 evaluated samples. These samples are part of the reported evaluation rather than a discarded warm-up set. MAReuse-D records only target-model-verified selected paths from these causally observed samples, then freezes a specialized 61-node template for subsequent samples; reference answers, correctness labels, and future samples are not used for specialization.
 \end{itemize}
@@ -291,7 +294,7 @@ We use a feed-forward directed acyclic graph (DAG) for each multi-agent workflow
 
 \subsection{Prompt Templates}
 
-Our prompt templates follow the general design of KVCOMM~\citep{ye2025kvcomm}, including dataset-specific agent roles and placeholder-based context injection. We make small task-formatting and output-format adjustments for MAReuse, while keeping the overall multi-agent workflow comparable. Unless otherwise stated, \placeholder{user\_question} denotes the dataset input, \placeholder{agent\_i\_current} denotes the current-round output from Agent $i$, and \placeholder{condition\_i\_current} denotes tool or execution feedback associated with Agent $i$.
+Our prompt templates follow the general design of KVCOMM~\citep{ye2026kvcomm}, including dataset-specific agent roles and placeholder-based context injection. We make small task-formatting and output-format adjustments for MAReuse, while keeping the overall multi-agent workflow comparable. Unless otherwise stated, \placeholder{user\_question} denotes the dataset input, \placeholder{agent\_i\_current} denotes the current-round output from Agent $i$, and \placeholder{condition\_i\_current} denotes tool or execution feedback associated with Agent $i$.
 
 \paragraph{GSM8K}
 
