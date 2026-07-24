@@ -92,7 +92,7 @@ We represent a multi-agent inference workflow as a directed acyclic graph $G=(V,
 \end{equation}
 where $\cdot$ denotes concatenation of prompt segments, $a_i$ denotes fixed role instructions, few-shot examples, or template text, and $z_i$ denotes dynamic content such as the user question, predecessor outputs, or auxiliary conditions. Since node outputs are inserted into successor prompts, previously processed text is repeatedly encoded by downstream nodes. For a chain of $M$ calls whose accumulated context grows by an average of $L$ tokens per call, the total prefill token-processing volume is approximately $O(\sum_{i=1}^{M}iL)=O(M^2L)$. If each call generates an average of $Y$ tokens, the workflow also performs $O(MY)$ autoregressive decoding steps. Despite this linear scaling, decoding remains a major latency bottleneck because token generation is inherently sequential.
 
-\subsection{(Observation 1) High-Deviation Tokens Shift Across Layers}
+\subsection{Observation 1: High-Deviation Token Sets Vary Shift Across Layers}
 
 As discussed above, directly reusing another agent's output KV cache can produce substantially different KV states, since the receiving agent conditions the same output on a different prefix. Selectively recomputing a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens by K or V deviation. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
 \begin{equation}
@@ -123,7 +123,7 @@ $\operatorname{Jaccard}(\mathcal S_{16},\mathcal S_f)$ & 0.6944 & 0.7569 & 1.000
 
 Table~\ref{tab:layer-drift} shows that layer-1 selection drifts substantially from middle and deep layers, with its Jaccard similarity dropping to 0.4926 at layer 24. In contrast, selections from later layers better match nearby and deeper layers, with $\mathcal S_{16}$ maintaining a 0.8971 overlap with layer 24. Thus, relying only on the initial high-deviation token selection may be unreliable for later-layer errors.
 
-\subsection{(Observation 2) Multi-Agent Outputs Contain Long Exact Reuse Spans}
+\subsection{Observation 2: Multi-Agent Outputs Exhibit Long Exact-Match Spans}
 
 To conservatively estimate reuse opportunities during decoding, let $Y=(y_1,\ldots,y_n)$ be an agent output sequence and let $S$ be a candidate source sequence, such as prior agent outputs, few-shot examples, or the user question. For each $i\in\{1,\ldots,n\}$, $L_i$ denotes the longest exact contiguous span starting at $i$ that also appears in $S$:
 \begin{equation}
@@ -159,7 +159,7 @@ The coverage by spans of length at least $k$ is
 
 This metric measures how much of the output token sequence is covered by long exact spans from the candidate source. Table~\ref{tab:coverage} compares multi-agent outputs on GSM8K~\citep{DBLP:journals/corr/abs-2110-14168} with Spec-Bench~\citep{xia2024unlocking}, a speculative decoding dataset that simulates single-agent generation. Multi-agent outputs exhibit markedly stronger long-span reuse: $\mathrm{Coverage}{\ge16}$ increases from 5.2\% to 17.8\%, while the average longest match grows from 13.6 to 38.8 tokens. Moreover, reuse opportunities increase consistently with workflow width, with $\mathrm{Coverage}{\ge16}$ reaching 12.0\%, 18.2\%, and 21.1\% for workflows involving 3, 4, and 5 agents, respectively.
 
-\subsection{(Observation 3) Same-Role Histories Contain Cross-Sample Reuse}
+\subsection{Observation 3: Same-Role Histories Contain Cross-Sample Reuse Opportunities}
 
 To investigate whether additional reuse opportunities exist beyond the current sample, we examine cross-sample histories from both the same and different agent roles. Table~\ref{tab:cross-sample-reuse} compares different history sources using the metrics defined above. In-sample history remains the strongest source, with 26.0\% coverage and an average longest match of 38.8 tokens. Cross-sample same-role history reaches 10.4\% coverage and 24.1 tokens, substantially outperforming different-role history at 2.8\% and 11.7 tokens. This result supports role-aware global history as a complementary source when local reuse is unavailable.
 
