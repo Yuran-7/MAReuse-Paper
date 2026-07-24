@@ -89,9 +89,9 @@ This section presents implementation details of MAReuse-D. We first describe onl
 
 \subsection{Suffix Automaton Indexing}
 
-A suffix automaton (SAM) is a compact deterministic automaton that represents every substring of a sequence. A transition appends one token to the current match, while a suffix link connects a state to its longest proper suffix. Despite representing all substrings, a SAM built from $n$ tokens contains only $O(n)$ states and can be constructed online.
+A suffix automaton (SAM) is a compact deterministic automaton that represents every substring of a sequence. A transition appends one token to the current match, while a suffix link connects a state to its longest proper suffix. Despite representing all substrings, a SAM built from $n$ tokens contains only $O(n)$ states and can be constructed online, as summarized in Algorithm~\ref{alg:sam-build}.
 
-The main reason we use a SAM is its ability to adapt the matched context length to each query. Responses from different agents within the same sample often share only partial local contexts. By tracking the longest suffix present in the history and following suffix links when backoff is needed, the SAM preserves the longest valid match, whereas global matching relies on a small set of fixed anchor lengths and may miss reusable continuations.
+The main reason we use a SAM is its ability to adapt the matched context length to each query. Responses from different agents within the same sample often share only partial local contexts. By tracking the longest suffix present in the history and following suffix links when backoff is needed, the SAM preserves the longest valid match, whereas fixed-anchor matching relies on a small set of predefined lengths and may miss reusable continuations.
 
 Figure~\ref{fig:sam-example} illustrates the mechanism on a short
 sequence $T=\texttt{ABABC}$. The end-position set of a substring contains
@@ -106,9 +106,7 @@ which end at positions 2 and 4 and are followed by \texttt{ABC} and
 \texttt{C}, respectively. Since retrieval uses
 $S[s_2].\mathrm{minEnd}=2$ as the representative ending position, it
 selects the first occurrence of \texttt{AB} and reads its following
-tokens \texttt{ABC} as the continuation. Algorithm~\ref{alg:sam-build}
-summarizes the online extension procedure used to construct the SAM one
-token at a time.
+tokens \texttt{ABC} as the continuation.
 
 \begin{figure}[t]
     \centering
@@ -211,11 +209,11 @@ To retrieve a draft, \textsc{Retrieve} passes $z$ and the current cursor to \tex
 
 \subsection{Role-Aware Global Index}
 
-To reuse continuations across samples, MAReuse-D maintains a role-aware global index implemented as a hash-based span index. The index is organized as $G[r][L][a] \rightarrow \mathcal{L}$, where $r$ is an agent role, $L\in\{8,12,24\}$ is the anchor length, $a$ is an exact token anchor, and $\mathcal{L}$ is a bounded list of continuation entries. Each entry stores a tuple $(u,b,e)$ pointing to an eligible continuation $H_u[b:e]$ in source history $u$, with inclusive start $b$ and exclusive end $e$. This representation stores only a source identifier and two offsets rather than duplicating continuation tokens. When the same anchor is observed again, the new entry is added to the list, which is kept at a fixed maximum size.
+To reuse continuations across samples, MAReuse-D maintains a role-aware global index implemented as a hash-based span index. Figure~\ref{fig:global-span-index} illustrates its organization and optional pruning process. The index is organized as $G[r][L][a] \rightarrow \mathcal{L}$, where $r$ is an agent role, $L\in\{8,12,24\}$ is the anchor length, $a$ is an exact token anchor, and $\mathcal{L}$ is a bounded list of continuation entries. Each entry stores a tuple $(u,b,e)$ pointing to an eligible continuation $H_u[b:e]$ in source history $u$, with inclusive start $b$ and exclusive end $e$. This representation stores only a source identifier and two offsets rather than duplicating continuation tokens. When the same anchor is observed again, the new entry is added to the list, which is kept at a fixed maximum size.
 
-At lookup, the current role selects its partition and the index tries longer anchors first. For a matched anchor, MAReuse-D ranks the entries in its list using lightweight evidence such as few-shot priority, past hit count, recency, and available continuation length, and returns the selected referenced span subject to the draft budget for $L$. The index also supports TTL-based cold-anchor pruning as an optional memory-control mechanism: singleton anchors that survive for a configured number of completed samples without being hit can be removed, while few-shot anchors and multi-entry lists are retained. Unless otherwise specified, our main experiments use the unpruned index to isolate the effect of cross-sample reuse from memory-reduction heuristics.
+At lookup, the current role selects its partition and the index tries longer anchors first. For a matched anchor, MAReuse-D ranks the entries in its list using lightweight evidence such as past hit count, recency, and available continuation length, and returns the selected referenced span subject to the draft budget for $L$. The index also supports TTL-based cold-anchor pruning as an optional memory-control mechanism: singleton anchors that survive for a configured number of completed samples without being hit can be removed, while few-shot anchors and multi-entry lists are retained. Unless otherwise specified, our main experiments use the unpruned index to isolate the effect of cross-sample reuse from memory-reduction heuristics.
 
-The index is initially empty and persists across completed samples. New spans become visible only after their source sample finishes, so retrieval uses model-generated text from prior samples but never reference answers, correctness labels, or current/future information. Every retrieved span is only a proposal and must still be verified by the target model.
+The index is initially empty and persists across completed samples. After each sample finishes, its newly generated continuations are processed together and added to the index in a batch. This avoids repeated global-index updates during decoding and improves construction efficiency.
 
 \subsection{Collaborative Decoding Procedure}
 

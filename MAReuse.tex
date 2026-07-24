@@ -34,13 +34,6 @@ Multi-agent large language model (LLM) systems improve complex problem solving t
 
 \section{Introduction}
 
-\begin{figure*}[t]
-	\centering
-	\includegraphics[width=0.98\textwidth]{"Figures/Overview of MAReuse.pdf"}
-	\caption{Overview of MAReuse. The framework reuses aligned KV caches during prefill with filter-layer correction and accelerates decoding with verifiable drafts from local outputs, role-aware history, and logits-cache trees.}
-	\label{fig:mareuse-overview}
-\end{figure*}
-
 Recent LLM-based systems increasingly employ multiple collaborating agents to improve their ability to solve complex tasks. These agents can assume specialized roles, exchange intermediate results, and combine outputs produced throughout a structured workflow \citep{DBLP:conf/nips/LiHIKG23, DBLP:conf/iclr/ZhangYLYWWCY025}. When multiple agents collaborate toward a shared goal, their coordination naturally creates overlap in the information they process, as each agent repeatedly consumes the common task description, shared evidence, and intermediate outputs produced by other agents. This repeated processing leads to redundant computation and increased inference latency.
 
 %Existing work on accelerating multi-agent inference focuses on reducing prefill overhead through KV cache reuse. Prefix caching works only for identical prompt prefixes \citep{DBLP:conf/sosp/KwonLZ0ZY0ZS23, DBLP:conf/nips/ZhengYXS0YCKSGB24}, which are easily invalidated when dynamically generated agent outputs are inserted at different positions. Non-prefix methods relax this restriction by using RoPE~\citep{DBLP:journals/ijon/SuALPBL24} to reposition cached keys across agent prompts before concatenation~\citep{DBLP:conf/fast/LiuG0WX0GHM26}. After RoPE alignment, selective correction methods recompute a subset of tokens to improve reused KV states. However, their token selection typically relies on first-layer KV deviations, and the selected positions remain fixed across later layers~\citep{DBLP:conf/eurosys/YaoLLRCZD0J25}. We observe that high-deviation tokens shift across layers; a fixed shallow-layer selection may therefore miss later-layer errors and degrade accuracy.
@@ -83,7 +76,9 @@ KV cache reuse is an important direction for reducing LLM prefill cost. Prefix c
 Speculative decoding reduces serial autoregressive steps by generating draft tokens and verifying them in parallel with the target model. Training-free methods retrieve candidates from repeated prompt fragments, as in Prompt Lookup Decoding \citep{saxena2023promptlookup}, or improve candidate construction with logits and automaton indices: Token Recycling builds logits trees from top-$k$ candidates, SAM-Decoding retrieves suffix-automaton matches, and RACER combines logits trees with Aho-Corasick retrieval \citep{DBLP:conf/acl/LuoWZZZ0X25, DBLP:conf/acl/HuWZZLCZ25, zhang2026racer}. These methods improve draft coverage but mostly target single-request or single-agent contexts. Model-based methods such as EAGLE-3 and DSpark train dedicated draft components \citep{DBLP:conf/nips/LiWZZ25, cheng2026dspark}; in contrast, MAReuse requires no additional model training and constructs drafts from in-sample cross-agent outputs and cross-sample role-aware history.
 
 
-\section{Observations}
+\section{Preliminaries and Observations}
+
+\subsection{Preliminaries}
 
 We represent a multi-agent inference workflow as a directed acyclic graph $G=(V,E)$. Each node $v\in V$ corresponds to an agent invocation, while each edge $e\in E$ represents the transfer of generated text from a predecessor node to a successor prompt. The prompt of node $v$ can be written as an alternating sequence of static template segments and dynamic placeholders:
 \begin{equation}
@@ -188,6 +183,13 @@ Cross-sample diff-role history & 2.8\% & 11.7 \\
 \section{MAReuse}
 
 \subsection{Overview}
+
+\begin{figure*}[t]
+	\centering
+	\includegraphics[width=0.98\textwidth]{"Figures/Overview of MAReuse.pdf"}
+	\caption{Overview of MAReuse. The framework reuses aligned KV caches during prefill with filter-layer correction and accelerates decoding with verifiable drafts from local outputs, role-aware history, and logits-cache trees.}
+	\label{fig:mareuse-overview}
+\end{figure*}
 
 Figure~\ref{fig:mareuse-overview} illustrates the overall workflow of MAReuse. Given a fixed multi-agent workflow, MAReuse accelerates inference without adding a draft model or changing the generation policy. As agents execute, they produce token sequences along with reusable byproducts of target-model computation, including KV caches, auxiliary hidden states, and logits from verified decoding steps. Token ids provide the sequence anchors for both prompt reconstruction and history matching; KV caches, together with hidden states, help avoid redundant prefill computation; and cached logits provide alternative next-token candidates for constructing fallback tree drafts. 
 
