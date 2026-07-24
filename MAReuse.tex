@@ -103,7 +103,7 @@ Here $\operatorname{Top}_{\rho}$ returns the top-$\rho$ fraction of reused-token
 \begin{tabular}{lcccc}
 \hline
 \addlinespace[1pt]
-Comparison layer $f$ & 4 & 6 & 16 & 24 \\
+Comparison layer & $f=4$ & $f=6$ & $f=16$ & $f=24$ \\
 \hline
 \addlinespace[1pt]
 $\operatorname{Jaccard}(\mathcal S_1,\mathcal S_f)$ & 0.7425 & 0.5736 & 0.6333 & 0.4926 \\
@@ -139,7 +139,7 @@ The coverage by spans of length at least $k$ is
 	\begin{tabular}{lcccc}
 		\hline
 		\addlinespace[1pt]
-		Scenario & $\ge4$ & $\ge8$ & $\ge16$ & Avg. longest \\
+		Scenario & $k\ge4$ & $k\ge8$ & $k\ge16$ & Avg. longest \\
 		\hline
 		\addlinespace[1pt]
 		Spec-Bench & 25.0\% & 13.0\% & 5.2\% & 13.6 \\
@@ -165,7 +165,7 @@ To investigate whether additional reuse opportunities exist beyond the current s
 \begin{tabular}{lcc}
 \hline
 \addlinespace[1pt]
-History source & Cov. $\ge8$ & Avg. longest \\
+History source & Cov. $k\ge8$ & Avg. longest \\
 \hline
 \addlinespace[1pt]
 In-sample history & 26.0\% & 38.8 \\
