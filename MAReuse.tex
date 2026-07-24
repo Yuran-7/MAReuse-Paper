@@ -94,7 +94,7 @@ where $\cdot$ denotes concatenation of prompt segments, $a_i$ denotes fixed role
 
 \subsection{Observation 1: High-Deviation Token Sets Vary Shift Across Layers}
 
-As discussed above, directly reusing another agent's output KV cache can produce substantially different KV states, since the receiving agent conditions the same output on a different prefix. Selectively recomputing a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens by K or V deviation. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
+As discussed above, the same output can have different KV states under different prefixes, making direct KV-cache reuse across agents inaccurate. Selectively recomputing a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens by K or V deviation. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
 \begin{equation}
 \mathcal S_\ell =
 \operatorname{Top}_{\rho}
