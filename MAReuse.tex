@@ -82,23 +82,28 @@ Speculative decoding reduces serial autoregressive steps by generating draft tok
 
 \subsection{Preliminaries}
 
-We represent a multi-agent inference workflow as a directed acyclic graph $G=(V,E)$. Each node $v\in V$ corresponds to an agent invocation, while each edge $e\in E$ represents the transfer of generated text from a predecessor node to a successor prompt. The prompt of node $v$ can be written as an alternating sequence of static template segments and dynamic placeholders:
+We model a multi-agent inference workflow as a directed acyclic graph $G=(V,E)$. Each node $v\in V$ corresponds to an agent invocation, while each edge $e\in E$ represents the transfer of generated text from a predecessor node to a successor prompt. The prompt of node $v$ can be written as an alternating sequence of static template segments and dynamic placeholders:
 \begin{equation}
 	P_v = a_0 \cdot z_1 \cdot a_1 \cdot \ldots \cdot z_m \cdot a_m,
 	\label{eq:prompt-decomposition}
 \end{equation}
+<<<<<<< HEAD
 where $\cdot$ denotes concatenation of prompt segments, $a_i$ denotes fixed role instructions, few-shot examples, or template text, and $z_i$ denotes dynamic content such as the user question, predecessor outputs, or auxiliary conditions. Since node outputs are inserted into successor prompts, previously processed text is repeatedly encoded by downstream nodes. For a chain of $M$ calls whose accumulated context grows by an average of $L$ tokens per call, the total prefill token-processing volume is approximately $O(\sum_{i=1}^{M}iL)=O(M^2L)$~\citep{DBLP:journals/corr/abs-2510-12872}. If each call generates an average of $Y$ tokens, the workflow also performs $O(MY)$ autoregressive decoding steps. Despite this linear scaling, decoding remains a major latency bottleneck because token generation is inherently sequential.
+=======
+where $\cdot$ denotes concatenation of prompt segments, $a_i$ denotes  fixed role instructions, few-shot examples, or template text, and $z_i$ denotes dynamic content such as the user question, predecessor outputs, or auxiliary conditions. Since node outputs are inserted into successor prompts, previously processed text is repeatedly encoded by downstream nodes. For a chain of $M$ calls whose accumulated context grows by an average of $L$ tokens per call, the total prefill token-processing volume is approximately $O(\sum_{i=1}^{M}iL)=O(M^2L)$. If each call generates an average of $Y$ tokens, the workflow also performs $O(MY)$ autoregressive decoding steps. Although this cost grows only linearly, decoding remains a major latency bottleneck because token generation is inherently sequential.
+>>>>>>> 32a4ebbea2e8fdc8d449dc91461dc1abfe7edc43
 
-\subsection{Observation 1: High-Deviation Token Sets Vary Shift Across Layers}
+\subsection{Observation 1: First-Layer Token Selection Poorly Predicts Later-Layer Deviations}
+We observe that tokens with the largest KV deviations change substantially across layers, making first-layer token selection an unreliable proxy for later-layer errors.
 
-As discussed above, the same output can have different KV states under different prefixes, making direct KV cache reuse across agents inaccurate. Selectively recomputing the KV state of a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens by K or V deviation. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
+As discussed above, the same output can have different KV states under different prefixes, making direct KV cache reuse across agents inaccurate. Selectively recomputing the KV state of a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens according to their K or V deviations at the first comparison layer of LLMs and uses the resulting fixed token set for recomputation in all subsequent layers. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
 \begin{equation}
 \mathcal S_\ell =
 \operatorname{Top}_{\rho}
 \{\|V_i^\ell-\tilde V_i^\ell\|_2^2\}_i .
 \end{equation}
-Here $\operatorname{Top}_{\rho}$ returns the top-$\rho$ fraction of reused-token indices. The same definition can be applied with key deviation. CacheBlend selects $\mathcal S_1$, i.e., the tokens with the largest layer-1 deviation, and uses this fixed set for recomputation in all later layers. We conduct this analysis on HotpotQA~\citep{DBLP:conf/emnlp/Yang0ZBCSM18}, one of the datasets used in CacheBlend's analysis. We evaluate the consistency of token selection across layers by comparing $\mathcal S_1$, $\mathcal S_6$, and $\mathcal S_{16}$ with $\mathcal S_f$ at comparison layers $f\in{4,6,16,24}$. With $\rho=20\%$, consistency is measured by Jaccard similarity. If layer-1 deviations were reliable proxies for later-layer deviations, $\mathcal S_1$ would maintain high overlap with the selected sets at middle and deep layers.
-
+Here $\operatorname{Top}_{\rho}$ returns the top-$\rho$ fraction of reused-token indices. The same definition can be applied with key deviation. CacheBlend selects $\mathcal S_1$, i.e., the tokens with the largest layer-1 deviation, and uses this fixed set for recomputation in all later layers. We conduct this analysis on HotpotQA~\citep{DBLP:conf/emnlp/Yang0ZBCSM18}, one of the datasets used in CacheBlend's analysis. We evaluate the consistency of token selection across layers by comparing $\mathcal S_1$, $\mathcal S_6$, and $\mathcal S_{16}$ with $\mathcal S_f$ at comparison layers $f\in{4,6,16,24}$. With $\rho=20\%$, consistency is measured by Jaccard similarity. 
+%If layer-1 deviations were reliable proxies for later-layer deviations, $\mathcal S_1$ would maintain high overlap with the selected sets at middle and deep layers.
 \begin{table}[t]
 \centering
 \setlength{\tabcolsep}{4.7pt}
@@ -117,16 +122,17 @@ $\operatorname{Jaccard}(\mathcal S_{16},\mathcal S_f)$ & 0.6944 & 0.7569 & 1.000
 \caption{Layer-wise drift of high-deviation token selection on HotpotQA using Llama-3.1-8B-Instruct.}
 \label{tab:layer-drift}
 \end{table}
+As shown in Table~\ref{tab:layer-drift}, the overlap between $\mathcal S_1$ and later-layer selections decreases to 0.4926 at layer 24, whereas $\mathcal S_{16}$ retains a much higher overlap of 0.8971. 
+This indicates that first-layer deviations are not reliable proxies for deep-layer errors, motivating token re-selection at an intermediate layer.
 
-Table~\ref{tab:layer-drift} shows that layer-1 selection drifts substantially from middle and deep layers, with its Jaccard similarity dropping to 0.4926 at layer 24. In contrast, selections from later layers better match nearby and deeper layers, with $\mathcal S_{16}$ maintaining a 0.8971 overlap with layer 24. Thus, relying only on the initial high-deviation token selection may be unreliable for later-layer errors.
 
 \subsection{Observation 2: Multi-Agent Outputs Exhibit Long Exact-Match Spans}
 
 To conservatively estimate reuse opportunities during decoding, let $Y=(y_1,\ldots,y_n)$ be an agent output sequence and let $S$ be a candidate source sequence, such as prior agent outputs, few-shot examples, or the user question. For each $i\in\{1,\ldots,n\}$, $L_i$ denotes the longest exact contiguous span starting at $i$ that also appears in $S$:
 \begin{equation}
-L_i=\max\{\ell \mid \exists j,\;Y_{i:i+\ell-1}=S_{j:j+\ell-1}\}.
+L_i=\max\{\ell \mid \exists j,\;Y_{i:i+\ell-1}=S_{j:j+\ell-1}\},
 \end{equation}
-Here $j$ indexes the matching start position in $S$, and $\ell$ is the length of the exact match.
+where $j$ is the start position of the matching span in $S$.
 The coverage by spans of length at least $k$ is
 \begin{equation}
 \begin{gathered}
@@ -160,7 +166,7 @@ This metric measures how much of the output token sequence is covered by long ex
 
 To investigate additional reuse opportunities beyond the current sample, we examine cross-sample histories from both the same and different agent roles. Table~\ref{tab:cross-sample-reuse} compares different sources using the metrics defined above. In-sample history remains the strongest source, with 26.0\% coverage and an average longest match of 38.8 tokens. Cross-sample same-role history reaches 10.4\% coverage and 24.1 tokens, substantially outperforming different-role history at 2.8\% and 11.7 tokens. This result supports role-aware global history as a complementary source when local reuse is unavailable.
 
-\begin{table}[t]
+\begin{table}[h]
 \centering
 %\small
 \setlength{\tabcolsep}{3pt}
@@ -193,11 +199,11 @@ Cross-sample diff-role history & 2.8\% & 11.7 \\
 	\label{fig:mareuse-overview}
 \end{figure*}
 
-Figure~\ref{fig:mareuse-overview} illustrates the overall workflow of MAReuse. Given a fixed multi-agent workflow, MAReuse accelerates inference without adding a draft model or changing the generation policy. As agents execute, they produce token sequences along with reusable byproducts of target-model computation, including KV caches, auxiliary hidden states, and logits from verified decoding steps. Token ids provide the sequence anchors for both prompt reconstruction and history matching; KV caches, together with hidden states, help avoid redundant prefill computation; and cached logits provide alternative next-token candidates for constructing fallback tree drafts. 
+Figure~\ref{fig:mareuse-overview} illustrates MAReuse, a unified computation-reuse framework that accelerates both prefill and decoding in fixed multi-agent workflows without introducing an auxiliary draft model or modifying the original workflow. During prefill, MAReuse reuses aligned KV caches with intermediate filter-layer correction; during decoding, it hierarchically constructs verifiable drafts from local exact matches, role-aware global histories, and a logits-cache tree fallback.
 
 \subsection{Prefill Reuse with Filter-Layer Correction}
 
-Following Eq.~\eqref{eq:prompt-decomposition}, MAReuse precomputes KV caches for static segments $a_i$ during graph initialization and caches user questions, agent responses, and generated conditions as they become available. To construct node $v$'s prompt, it retrieves and concatenates the required token IDs and KV caches, then realigns each chunk by adjusting its RoPE rotations, following standard non-prefix KV-reuse practice. After positional realignment, MAReuse selects a token subset for recomputation under the assembled prompt. However, \textbf{Observation 1} shows that selecting this subset only from layer-1 deviations, as in CacheBlend, may miss tokens important at later layers.
+MAReuse precomputes and stores the KV caches of static prompt segments $a_i$ during workflow initialization. It then caches the KV states of runtime inputs and intermediate outputs, including the user question, agent responses, and auxiliary conditions, as they become available. To construct node $v$'s prompt, it retrieves and concatenates the required token IDs and KV caches, then realigns each chunk by adjusting its RoPE rotations, following standard non-prefix KV-reuse practice. After positional realignment, MAReuse selects a token subset for recomputation under the assembled prompt. However, \textbf{Observation 1} shows that selecting this subset only from the layer-1 deviations, as in CacheBlend, may miss tokens important at later layers.
 
 MAReuse addresses this issue with filter-layer correction. A straightforward approach is to choose a filter layer $f$, fully recompute all tokens at every layer preceding $f$, and then select tokens at layer $f$. To avoid recomputing all layers before $f$, MAReuse additionally records the input hidden states of layer $f-1$ when a reusable segment is first produced. During reuse, it applies RoPE alignment, selects high-deviation tokens at layer 1, and propagates only these tokens to layer $f-1$. It combines the updated hidden states of the selected tokens with stored states for the remaining tokens and recomputes all tokens in the full sequence at layer $f-1$. The resulting hidden states produce KV states at layer $f$, which are compared with the concatenated reused KV states. Based on these deviations, MAReuse re-selects the tokens to be recomputed from layer $f$ onward, while the remaining tokens continue to use their aligned cached states.
 
@@ -221,13 +227,13 @@ We set $\mathcal L$ to all model layers and report the sweep in Figure~\ref{fig:
 \label{fig:filter-layer-sweep}
 \end{figure}
 
-\subsection{Collaborative Speculative Decoding}
+\subsection{Decoding with Collaborative Speculative}
 
 \subsubsection{Local Retrieval with a Dynamic Suffix Automaton}
 
 MAReuse constructs speculative drafts from multi-agent generation histories containing tokens already generated or verified by the target model. \textbf{Observation 2} shows that multi-agent outputs contain many long exact reuse spans, especially intermediate content generated by other agents earlier within the same sample. To capture these opportunities, MAReuse uses a dynamic suffix automaton (SAM) as its local index.
 
-A suffix automaton compactly represents all substrings of the inserted token history~\citep{DBLP:journals/tcs/BlumerBHECS85} and supports online fallback through suffix links to find the longest available match. The SAM is initialized empty at the start of each sample and released after the sample finishes, restricting the local index to current-sample histories. At each speculative decoding step, MAReuse queries the SAM for the longest in-sample suffix match and uses the following tokens as a linear draft; after verification, the accepted tokens are inserted back into the SAM. This dynamic-anchor design avoids committing to a fixed anchor length: short fixed anchors are easy to match but weakly constrained, while long fixed anchors impose strict matching requirements and may miss reuse opportunities. As shown in Table~\ref{tab:local-sam-ablation}, dynamic matching outperforms fixed $n$-gram anchors in throughput and MAT.
+A suffix automaton compactly represents all substrings of the inserted token history and supports online fallback through suffix links to find the longest available match. SAM is initialized empty at the start of each sample and released after the sample finishes, restricting the local index to current-sample histories. At each speculative decoding step, MAReuse queries SAM for the longest in-sample suffix match and uses the following tokens as a linear draft; after verification, the accepted tokens are inserted back into SAM. This dynamic-anchor design avoids committing to a fixed anchor length: short fixed anchors are easy to match but weakly constrained, while long fixed anchors impose strict matching requirements and may miss reuse opportunities. As shown in Table~\ref{tab:local-sam-ablation}, dynamic matching outperforms fixed $n$-gram anchors in throughput and MAT.
 
 \begin{table}[!t]
 \centering
