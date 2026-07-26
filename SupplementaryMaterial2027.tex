@@ -296,7 +296,7 @@ Our prompt templates follow the general design of KVCOMM~\citep{ye2026kvcomm}, i
 
 \paragraph{GSM8K}
 
-For GSM8K, agents solve grade-school math problems through complementary reasoning styles. Downstream agents receive the question together with upstream reasoning, code, and execution feedback through explicit placeholders. The final agent aggregates all prior answers and is instructed to put only the final numeric result on the last line.
+For GSM8K, agents use complementary reasoning with shared code and execution feedback, and the final agent aggregates their outputs into a numeric answer.
 
 \begin{promptbox}{Math Solver}
 	You are a math expert. You will be given a math problem and hints from other agents. Give your own solving process step by step based on hints. The last line of your output contains only the final result without any units, for example: The answer is 140.
@@ -376,7 +376,7 @@ For GSM8K, agents solve grade-school math problems through complementary reasoni
 	the answer is \placeholder{condition\_3\_current}
 \end{promptbox}
 
-\begin{promptbox}{GSM8K Top Decision-Maker}
+\begin{promptbox}{Top Decision-Maker}
 	You are the top decision-maker. You will be given a math problem, analysis and code from other agents. Please find the most reliable answer based on the analysis and results of other agents. Give reasons for making decisions. The last line of your output contains only the final result without any units, for example: The answer is 140.
 	
 	The task is:
@@ -572,38 +572,6 @@ For HumanEval, agents collaborate on code generation and debugging. Downstream a
 	\placeholder{condition\_3\_current}
 \end{promptbox}
 
-\begin{promptbox}{Bug Fixer}
-	You are a bug fixer. You will be given a function signature and its docstring by the user. You need to provide modified and improved python code based on the current overall code design, algorithm framework, code implementation or test problems. Write your full implementation (restate the function signature). Use a Python code block to write your response. Do not include anything other than Python code blocks in your response. Do not change function names and input variable types in tasks.
-	
-	The task is:
-	
-	\placeholder{user\_question}
-	
-	At the same time, the outputs and feedbacks of other agents are as follows:
-	
-	Agent 1 as a Project Manager provides the following info:
-	
-	\placeholder{agent\_1\_current}
-	
-	Agent 2 as an Algorithm Designer provides the following info:
-	
-	\placeholder{agent\_2\_current}
-	
-	Agent 3 as a Programming Expert:
-	
-	The code written by the agent is:
-	
-	\placeholder{agent\_3\_current}
-	
-	Whether it passes internal testing?
-	
-	\placeholder{condition\_3\_current}
-	
-	Agent 4 as a Test Analyst provides the following info:
-	
-	\placeholder{agent\_4\_current}
-\end{promptbox}
-
 \begin{promptbox}{HumanEval Top Decision-Maker}
 	You are the top decision-maker and are good at analyzing and summarizing other people's opinions, finding errors and giving final answers. And you are an AI that only responds with only python code.
 	
@@ -653,16 +621,16 @@ For HumanEval, agents collaborate on code generation and debugging. Downstream a
 
 \subsection{Filter-Layer Selection on Qwen Models}
 
-The main paper selects the MAReuse-P filter layer using an offline sweep on the target model. To check whether the same selection principle holds beyond the Llama-based GSM8K and MMLU settings, we additionally sweep the reselection layer on two Qwen-family instruction models: Qwen2.5-Coder-7B-Instruct, which is used for HumanEval in the main experiments, and Qwen2.5-7B-Instruct, a general instruction-following model of the same family. For each candidate layer, we reuse the same correction budget and measure the overall deviation reduction defined in Equation~(1) of the main paper.
+The main paper selects the MAReuse-P filter layer through an offline sweep on the target model. To evaluate whether this selection principle generalizes beyond the Llama-based settings, we conduct the same sweep on HumanEval using two Qwen-family models: Qwen2.5-Coder-7B-Instruct, used in our main HumanEval experiments, and Qwen2.5-7B-Instruct, a general-purpose instruction model. For each candidate layer, we use the same 20\% correction budget and measure the overall deviation reduction defined in Equation~(5) of the main paper.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{Figures/supp_qwen_filter_layer.pdf}
-\caption{Offline filter-layer sweep on Qwen-family instruction models. The curves report overall deviation reduction under different reselection layers, using layer-1 correction as the baseline.}
+\caption{Offline filter-layer sweep on Qwen-family instruction models using the HumanEval dataset. The curves report overall deviation reduction under different reselection layers, using layer-1 correction as the baseline.}
 \label{fig:supp-qwen-filter-layer}
 \end{figure}
 
-Figure~\ref{fig:supp-qwen-filter-layer} reports the measured sweep results using the same protocol and visual convention as Figure~2 in the main paper. Both Qwen variants show a non-monotonic layer trend: intermediate layers provide stronger deviation reduction than the layer-1 baseline, while deeper layers reduce the remaining propagation depth available after reselection. This supports using an offline model-specific sweep rather than fixing the reselection layer purely by depth. In the final experiments, we use layer 7 for Qwen2.5-Coder-7B-Instruct and keep this choice fixed for all downstream HumanEval and Qwen ablations.
+Figure~\ref{fig:supp-qwen-filter-layer} reports the results using the same metric and visual convention as Figure~2 in the main paper. Both models exhibit a non-monotonic trend: intermediate layers achieve greater deviation reduction than layer-1 correction, whereas deeper layers leave fewer downstream layers to benefit from correction. This result supports selecting the filter layer through an offline model-specific sweep rather than fixing it solely based on model depth. Based on this sweep, we use layer 7 for Qwen2.5-Coder-7B-Instruct in the main HumanEval experiments and vary it only in the dedicated filter-layer ablation below.
 
 \subsection{MMLU and HumanEval Filter-Layer Ablations}
 
@@ -686,7 +654,7 @@ We also sweep the filter layer on HumanEval under 2--5 agent workflows, using th
 
 
 
-\subsection{Stage-Level Runtime Breakdown}
+\subsection{Runtime Decomposition of MAReuse-D}
 
 We further decompose MAReuse-D into model forward, draft generation, verification update, retrieval update, and logits update. This breakdown separates target-model computation from runtime state management introduced by collaborative drafting, and helps identify whether the remaining overhead comes from candidate construction or from maintaining reusable decoding state.
 
@@ -699,7 +667,7 @@ We further decompose MAReuse-D into model forward, draft generation, verificatio
 
 As shown in Figure~\ref{fig:stage-runtime-breakdown}, model forward accounts for 80.70\% of the runtime, indicating that performance is primarily determined by how many accepted tokens can be amortized over each target-model invocation. Verification update contributes another 11.56\%. During tree verification, the target-model forward produces KV states for all nodes in the candidate tree, including those on subsequently rejected branches. After the accepted path is selected, the KV cache must therefore be compacted: the original context and the KV states corresponding to the accepted nodes are retained, while rejected branches are removed and the retained states are repacked into a contiguous decoding history. This operation gathers and copies both key and value states at every transformer layer, introducing substantial memory movement and making verification update considerably more expensive than draft construction.
 
-Retrieval update accounts for 5.76\%, reflecting an asymmetry between retrieval and maintenance: reading a continuation is inexpensive, whereas each accepted token must update suffix-automaton transitions and advance the collaborative retrieval state. Logits update contributes 1.26\%, as it only extracts and stores reusable top-$k$ successors from already computed logits. Consequently, draft generation itself requires only 0.72\% of the runtime. These results suggest that MAReuse-D introduces little candidate-construction overhead; its main optimization opportunities lie in increasing acceptance per target-model forward and reducing the memory movement associated with KV-cache compaction.
+Retrieval update accounts for 5.76\%, reflecting an asymmetry between retrieval and maintenance: reading a continuation is inexpensive, whereas each accepted token must update suffix-automaton transitions and advance the collaborative retrieval state. Logits update contributes 1.26\%, as it only extracts and stores reusable top-$k$ successors from already computed logits. Consequently, draft generation itself requires only 0.72\% of the runtime. These results suggest that MAReuse-D introduces little candidate-construction overhead; its main optimization opportunities lie in increasing acceptance per target-model forward and reducing verification-update overhead.
 \subsection{Accuracy Consistency of Decoding Baselines}
 
 Although speculative decoding verifies draft tokens with the target model, it
