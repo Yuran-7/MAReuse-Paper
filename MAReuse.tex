@@ -89,16 +89,17 @@ We model a multi-agent inference workflow as a directed acyclic graph $G=(V,E)$.
 \end{equation}
 where $\cdot$ denotes concatenation of prompt segments, $a_i$ denotes fixed role instructions, few-shot examples, or template text, and $z_i$ denotes dynamic content such as the user question, predecessor outputs, or auxiliary conditions. Since node outputs are inserted into successor prompts, previously processed text is repeatedly encoded by downstream nodes. For a chain of $M$ calls whose accumulated context grows by an average of $L$ tokens per call, the total prefill token-processing volume is approximately $O(\sum_{i=1}^{M}iL)=O(M^2L)$. If each call generates an average of $Y$ tokens, the workflow also performs $O(MY)$ autoregressive decoding steps. Although this cost grows only linearly, decoding remains a major latency bottleneck because token generation is inherently sequential.
 
-\subsection{Observation 1: High-Deviation Token Sets Vary Shift Across Layers}
+\subsection{Observation 1: First-Layer Token Selection Poorly Predicts Later-Layer Deviations}
+We observe that tokens with the largest KV deviations change substantially across layers, making first-layer token selection an unreliable proxy for later-layer errors.
 
-As discussed above, the same output can have different KV states under different prefixes, making direct KV cache reuse across agents inaccurate. Selectively recomputing the KV state of a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens by K or V deviation. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
+As discussed above, the same output can have different KV states under different prefixes, making direct KV cache reuse across agents inaccurate. Selectively recomputing the KV state of a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens according to their K or V deviations at the first comparison layer of LLMs and uses the resulting fixed token set for recomputation in all subsequent layers. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
 \begin{equation}
 \mathcal S_\ell =
 \operatorname{Top}_{\rho}
 \{\|V_i^\ell-\tilde V_i^\ell\|_2^2\}_i .
 \end{equation}
-Here $\operatorname{Top}_{\rho}$ returns the top-$\rho$ fraction of reused-token indices. The same definition can be applied with key deviation. CacheBlend selects $\mathcal S_1$, i.e., the tokens with the largest layer-1 deviation, and uses this fixed set for recomputation in all later layers. We conduct this analysis on HotpotQA~\citep{DBLP:conf/emnlp/Yang0ZBCSM18}, one of the datasets used in CacheBlend's analysis. We evaluate the consistency of token selection across layers by comparing $\mathcal S_1$, $\mathcal S_6$, and $\mathcal S_{16}$ with $\mathcal S_f$ at comparison layers $f\in{4,6,16,24}$. With $\rho=20\%$, consistency is measured by Jaccard similarity. If layer-1 deviations were reliable proxies for later-layer deviations, $\mathcal S_1$ would maintain high overlap with the selected sets at middle and deep layers.
-
+Here $\operatorname{Top}_{\rho}$ returns the top-$\rho$ fraction of reused-token indices. The same definition can be applied with key deviation. CacheBlend selects $\mathcal S_1$, i.e., the tokens with the largest layer-1 deviation, and uses this fixed set for recomputation in all later layers. We conduct this analysis on HotpotQA~\citep{DBLP:conf/emnlp/Yang0ZBCSM18}, one of the datasets used in CacheBlend's analysis. We evaluate the consistency of token selection across layers by comparing $\mathcal S_1$, $\mathcal S_6$, and $\mathcal S_{16}$ with $\mathcal S_f$ at comparison layers $f\in{4,6,16,24}$. With $\rho=20\%$, consistency is measured by Jaccard similarity. 
+%If layer-1 deviations were reliable proxies for later-layer deviations, $\mathcal S_1$ would maintain high overlap with the selected sets at middle and deep layers.
 \begin{table}[t]
 \centering
 \setlength{\tabcolsep}{4.7pt}
@@ -117,16 +118,17 @@ $\operatorname{Jaccard}(\mathcal S_{16},\mathcal S_f)$ & 0.6944 & 0.7569 & 1.000
 \caption{Layer-wise drift of high-deviation token selection on HotpotQA using Llama-3.1-8B-Instruct.}
 \label{tab:layer-drift}
 \end{table}
+As shown in Table~\ref{tab:layer-drift}, the overlap between $\mathcal S_1$ and later-layer selections decreases to 0.4926 at layer 24, whereas $\mathcal S_{16}$ retains a much higher overlap of 0.8971. 
+This indicates that first-layer deviations are not reliable proxies for deep-layer errors, motivating token re-selection at an intermediate layer.
 
-Table~\ref{tab:layer-drift} shows that layer-1 selection drifts substantially from middle and deep layers, with its Jaccard similarity dropping to 0.4926 at layer 24. In contrast, selections from later layers better match nearby and deeper layers, with $\mathcal S_{16}$ maintaining a 0.8971 overlap with layer 24. Thus, relying only on the initial high-deviation token selection may be unreliable for later-layer errors.
 
 \subsection{Observation 2: Multi-Agent Outputs Exhibit Long Exact-Match Spans}
 
 To conservatively estimate reuse opportunities during decoding, let $Y=(y_1,\ldots,y_n)$ be an agent output sequence and let $S$ be a candidate source sequence, such as prior agent outputs, few-shot examples, or the user question. For each $i\in\{1,\ldots,n\}$, $L_i$ denotes the longest exact contiguous span starting at $i$ that also appears in $S$:
 \begin{equation}
-L_i=\max\{\ell \mid \exists j,\;Y_{i:i+\ell-1}=S_{j:j+\ell-1}\}.
+L_i=\max\{\ell \mid \exists j,\;Y_{i:i+\ell-1}=S_{j:j+\ell-1}\},
 \end{equation}
-Here $j$ indexes the matching start position in $S$, and $\ell$ is the length of the exact match.
+where $j$ is the start position of the matching span in $S$.
 The coverage by spans of length at least $k$ is
 \begin{equation}
 \begin{gathered}
