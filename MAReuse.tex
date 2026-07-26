@@ -162,7 +162,7 @@ This metric measures how much of the output token sequence is covered by long ex
 
 To investigate additional reuse opportunities beyond the current sample, we examine cross-sample histories from both the same and different agent roles. Table~\ref{tab:cross-sample-reuse} compares different sources using the metrics defined above. In-sample history remains the strongest source, with 26.0\% coverage and an average longest match of 38.8 tokens. Cross-sample same-role history reaches 10.4\% coverage and 24.1 tokens, substantially outperforming different-role history at 2.8\% and 11.7 tokens. This result supports role-aware global history as a complementary source when local reuse is unavailable.
 
-\begin{table}[t]
+\begin{table}[h]
 \centering
 %\small
 \setlength{\tabcolsep}{3pt}
@@ -199,7 +199,7 @@ Figure~\ref{fig:mareuse-overview} illustrates the overall workflow of MAReuse. G
 
 \subsection{Prefill Reuse with Filter-Layer Correction}
 
-Following Eq.~\eqref{eq:prompt-decomposition}, MAReuse precomputes KV caches for static segments $a_i$ during graph initialization and caches user questions, agent responses, and generated conditions as they become available. To construct node $v$'s prompt, it retrieves and concatenates the required token IDs and KV caches, then realigns each chunk by adjusting its RoPE rotations, following standard non-prefix KV-reuse practice. After positional realignment, MAReuse selects a token subset for recomputation under the assembled prompt. However, \textbf{Observation 1} shows that selecting this subset only from layer-1 deviations, as in CacheBlend, may miss tokens important at later layers.
+MAReuse precomputes KV caches for static segments $a_i$ during graph initialization and caches user questions, agent responses, and generated conditions as they become available. To construct node $v$'s prompt, it retrieves and concatenates the required token IDs and KV caches, then realigns each chunk by adjusting its RoPE rotations, following standard non-prefix KV-reuse practice. After positional realignment, MAReuse selects a token subset for recomputation under the assembled prompt. However, \textbf{Observation 1} shows that selecting this subset only from layer-1 deviations, as in CacheBlend, may miss tokens important at later layers.
 
 MAReuse addresses this issue with filter-layer correction. A straightforward approach is to choose a filter layer $f$, fully recompute all tokens at every layer preceding $f$, and then select tokens at layer $f$. To avoid recomputing all layers before $f$, MAReuse additionally records the input hidden states of layer $f-1$ when a reusable segment is first produced. During reuse, it applies RoPE alignment, selects high-deviation tokens at layer 1, and propagates only these tokens to layer $f-1$. It combines the updated hidden states of the selected tokens with stored states for the remaining tokens and recomputes all tokens in the full sequence at layer $f-1$. The resulting hidden states produce KV states at layer $f$, which are compared with the concatenated reused KV states. Based on these deviations, MAReuse re-selects the tokens to be recomputed from layer $f$ onward, while the remaining tokens continue to use their aligned cached states.
 
