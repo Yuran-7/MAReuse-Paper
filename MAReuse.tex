@@ -75,7 +75,7 @@ KV cache reuse is an important direction for reducing LLM prefill cost. Prefix c
 
 \subsection{Speculative Decoding}
 
-Speculative decoding reduces serial autoregressive steps by generating draft tokens and verifying them in parallel with the target model. Training-free methods retrieve candidates from repeated prompt fragments, as in Prompt Lookup Decoding \citep{saxena2023promptlookup}, or improve candidate construction with logits and automaton indices: Token Recycling builds logits trees from top-$k$ candidates, SAM-Decoding retrieves suffix-automaton matches, and RACER combines logits trees with Aho-Corasick retrieval \citep{DBLP:conf/acl/LuoWZZZ0X25, DBLP:conf/acl/HuWZZLCZ25, DBLP:conf/acl/ZhangLZWZ26}. These methods improve draft coverage but mostly target single-request or single-agent contexts. Model-based methods such as EAGLE-3 and DSpark train dedicated draft components \citep{DBLP:conf/nips/LiWZZ25, cheng2026dspark}; in contrast, MAReuse requires no additional model training and constructs drafts from in-sample cross-agent outputs and cross-sample role-aware history.
+Speculative decoding reduces serial autoregressive steps by generating draft tokens and verifying them in parallel with the target model. Training-free methods retrieve candidates from repeated prompt fragments, as in Prompt Lookup Decoding \citep{saxena2023promptlookup}, or improve candidate construction with logits and automaton indexes: Token Recycling builds logits trees from top-$k$ candidates, SAM-Decoding retrieves suffix-automaton matches, and RACER combines logits trees with Aho-Corasick retrieval \citep{DBLP:conf/acl/LuoWZZZ0X25, DBLP:conf/acl/HuWZZLCZ25, DBLP:conf/acl/ZhangLZWZ26}. These methods improve draft coverage but mostly target single-request or single-agent contexts. Model-based methods such as EAGLE-3 and DSpark train dedicated draft components \citep{DBLP:conf/nips/LiWZZ25, cheng2026dspark}; in contrast, MAReuse requires no additional model training and constructs drafts from in-sample cross-agent outputs and cross-sample role-aware history.
 
 
 \section{Preliminaries and Observations}
@@ -197,7 +197,7 @@ Cross-sample diff-role history & 2.8\% & 11.7 \\
 	\label{fig:mareuse-overview}
 \end{figure*}
 
-Figure~\ref{fig:mareuse-overview} illustrates MAReuse, a unified computation-reuse framework for multi-agent workflows. MAReuse collects reusable artifacts from agent outputs into memory, including output token IDs, KV caches, auxiliary hidden states, and top-$k$ next-token candidates. During prefill, it reuses RoPE-aligned KV caches and uses the auxiliary hidden states for filter-layer correction. During decoding, output token IDs build local and role-aware histories for exact-match linear drafts, while cached top-$k$ candidates form the fallback logits-cache tree.
+Figure~\ref{fig:mareuse-overview} illustrates MAReuse, a unified computation-reuse framework for multi-agent workflows. MAReuse collects reusable artifacts from agent outputs into memory, including output token IDs, KV caches, auxiliary hidden states, and top-$k$ next-token candidates. During prefill, it reuses RoPE-aligned KV caches and uses the auxiliary hidden states for filter-layer correction. During decoding, MAReuse builds local and global indexes over output token histories for exact-match linear drafts, while cached top-$k$ candidates form the fallback logits-cache tree.
 
 \subsection{Prefill Reuse with Filter-Layer Correction}
 
@@ -252,7 +252,7 @@ Fixed 16-gram & 117.42 & 3.89 \\
 \end{table}
 \subsubsection{Role-Aware Global Retrieval}
 
-Motivated by \textbf{Observation 3}, MAReuse queries a role-aware global index after a local miss. The \textbf{global index} uses a hash table whose key consists of the role, anchor length, and exact anchor tokens. Each hash key maps to a bounded list of source-span references rather than duplicated continuation tokens. Outputs from completed samples are enumerated with three fixed anchor lengths and committed to their role-specific partitions. During retrieval, MAReuse tries longer anchors first and selects a referenced continuation using lightweight evidence such as historical hits, recency, and continuation length. We provide a TTL-based pruning mechanism for memory control. Each anchor records its last query access, and periodic pruning removes anchors that remain inactive beyond a configurable window; both the inactivity threshold and pruning interval are adjustable. Further details of the local and global indices are provided in the supplementary material.
+Motivated by \textbf{Observation 3}, MAReuse queries a role-aware global index after a local miss. The \textbf{global index} uses a hash table whose key consists of the role, anchor length, and exact anchor tokens. Each hash key maps to a bounded list of source-span references rather than duplicated continuation tokens. Outputs from completed samples are enumerated with three fixed anchor lengths and committed to their role-specific partitions. During retrieval, MAReuse tries longer anchors first and selects a referenced continuation using lightweight evidence such as historical hits, recency, and continuation length. We provide a TTL-based pruning mechanism for memory control. Each anchor records its last query access, and periodic pruning removes anchors that remain inactive beyond a configurable window; both the inactivity threshold and pruning interval are adjustable. Further details of the local and global indexes are provided in the supplementary material.
 
 \subsubsection{Logits-Cache Tree Fallback}
 
@@ -422,7 +422,7 @@ Table~\ref{tab:decoding-results} shows that MAReuse-D achieves the highest throu
 \centering
 \small
 \setlength{\tabcolsep}{3.6pt}
-\begin{tabular}{llcccc}
+\begin{tabular}{lccccc}
 \thickhline
 \textbf{Dataset} & \textbf{Agents} & \textbf{Base Acc.} & \textbf{Acc.} & \textbf{TTFT Sp.} & \textbf{Dec. Sp.} \\
 \hline
@@ -469,7 +469,7 @@ Figure~\ref{fig:ablation-filter-layer} evaluates filter-layer placement in MAReu
 \end{figure}
 
 \subsubsection{Decoding Components}
-Figure~\ref{fig:ablation-components} shows that the logits-cache tree is the foundation of MAReuse-D: removing it causes the largest drop, from 130.69 to 72.42 tokens/s and from 4.384 to 2.19 MAT, because it preserves draft coverage when retrieval is weak. The local and role-aware global indices are also indispensable: removing them lowers throughput to 105.71 and 122.33 tokens/s, respectively. These results show that local cross-agent reuse and global role-aware reuse complement each other, jointly forming an integrated draft mechanism with the logits-cache tree.
+Figure~\ref{fig:ablation-components} shows that the logits-cache tree is the foundation of MAReuse-D: removing it causes the largest drop, from 130.69 to 72.42 tokens/s and from 4.384 to 2.19 MAT, because it preserves draft coverage when retrieval is weak. The local and role-aware global indexes are also indispensable: removing them lowers throughput to 105.71 and 122.33 tokens/s, respectively. These results show that local cross-agent reuse and global role-aware reuse complement each other, jointly forming an integrated draft mechanism with the logits-cache tree.
 
 \section{Conclusion}
 
