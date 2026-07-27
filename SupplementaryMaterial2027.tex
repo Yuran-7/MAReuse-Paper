@@ -627,16 +627,16 @@ For HumanEval, agents collaborate on code generation and debugging. Downstream a
 
 \subsection{Filter-Layer Selection on Qwen Models}
 
-The main paper selects the MAReuse-P filter layer through an offline sweep on the target model. To evaluate whether this selection principle generalizes beyond the Llama-based settings, we conduct the same sweep on HumanEval using two Qwen-family models: Qwen2.5-Coder-7B-Instruct, used in our main HumanEval experiments, and Qwen2.5-7B-Instruct, a general-purpose instruction model. For each candidate layer, we use the same 20\% correction budget and measure the overall deviation reduction defined in Equation~(5) of the main paper.
+The main paper selects the MAReuse-P filter layer through an offline evaluation on the target model. To evaluate whether this selection principle generalizes beyond the Llama-based settings, we conduct the same evaluation on HumanEval using two Qwen-family models: Qwen2.5-Coder-7B-Instruct, used in our main HumanEval experiments, and Qwen2.5-7B-Instruct, a general-purpose instruction model. For each candidate layer, we use the same 20\% correction budget and measure the overall deviation reduction defined in Equation~(5) of the main paper.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{Figures/supp_qwen_filter_layer.pdf}
-\caption{Offline filter-layer sweep on Qwen-family instruction models using the HumanEval dataset. The curves report overall deviation reduction under different reselection layers, using layer-1 correction as the baseline.}
+\caption{Offline evaluation of candidate filter layers on Qwen-family instruction models using HumanEval. The curves report overall deviation reduction under different reselection layers, using layer-1 correction as the baseline.}
 \label{fig:supp-qwen-filter-layer}
 \end{figure}
 
-Figure~\ref{fig:supp-qwen-filter-layer} reports the results using the same metric and visual convention as Figure~2 in the main paper. Both models exhibit a non-monotonic trend: intermediate layers achieve greater deviation reduction than layer-1 correction, whereas deeper layers leave fewer downstream layers to benefit from correction. This result supports selecting the filter layer through an offline model-specific sweep rather than fixing it solely based on model depth. Based on this sweep, we use layer 7 for Qwen2.5-Coder-7B-Instruct in the main HumanEval experiments and vary it only in the dedicated filter-layer ablation below.
+Figure~\ref{fig:supp-qwen-filter-layer} reports the results using the same metric and visual convention as Figure~2 in the main paper. Both models exhibit a non-monotonic trend: intermediate layers achieve greater deviation reduction than layer-1 correction, whereas deeper layers leave fewer downstream layers to benefit from correction. This result supports selecting the filter layer through an offline model-specific evaluation rather than fixing it solely based on model depth. Based on this evaluation, we use layer 7 for Qwen2.5-Coder-7B-Instruct in the main HumanEval experiments and vary it only in the dedicated filter-layer ablation below.
 
 \subsection{MMLU and HumanEval Filter-Layer Ablations}
 
@@ -649,7 +649,7 @@ We further report filter-layer ablations for MAReuse-P on MMLU and HumanEval. Fo
 \label{fig:supp-mmlu-filter-layer-ablation}
 \end{figure}
 
-We also sweep the filter layer on HumanEval under 2--5 agent workflows, using the same 20\% recomputation budget as the main evaluation. Figure~\ref{fig:supp-humaneval-filter-layer-ablation} shows a less pronounced but still non-monotonic pattern on HumanEval, with average Pass@1 peaking at layer 7 (86.96\%). Together, the two task-level sweeps support using layer 6 for Llama-3.1-8B-Instruct on MMLU and layer 7 for Qwen2.5-Coder-7B-Instruct on HumanEval, consistent with choosing the filter layer through an offline model- and task-specific sweep rather than fixing it by depth alone.
+We also evaluate candidate filter layers on HumanEval under 2--5 agent workflows, using the same 20\% recomputation budget as the main evaluation. Figure~\ref{fig:supp-humaneval-filter-layer-ablation} shows a less pronounced but still non-monotonic pattern on HumanEval, with average Pass@1 peaking at layer 7 (86.96\%). Together, the two task-level evaluations support using layer 6 for Llama-3.1-8B-Instruct on MMLU and layer 7 for Qwen2.5-Coder-7B-Instruct on HumanEval, consistent with choosing the filter layer through an offline model- and task-specific evaluation rather than fixing it by depth alone.
 
 \begin{figure}[t]
 \centering
