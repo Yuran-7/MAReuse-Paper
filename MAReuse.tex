@@ -199,7 +199,7 @@ Cross-sample diff-role history & 2.8\% & 11.7 \\
 
 Figure~\ref{fig:mareuse-overview} illustrates the core pipeline of MAReuse. As the multi-agent workflow progresses, it dynamically harvests reusable artifacts from agent outputs, enabling filter-layer corrected KV cache reuse during prefill and collaborative speculative decoding during decoding.
 
-\subsection{Collection of Outputs}
+\subsection{Collecting Outputs}
 During multi-agent execution, MAReuse collects reusable artifacts from agent outputs into its reusable memory, including output token IDs, KV caches, auxiliary hidden states, and top-$k$ next-token candidates. During prefill, it reuses RoPE-aligned KV caches and leverages the auxiliary hidden states for filter-layer correction. During decoding, it builds local and global indexes over output token histories to construct exact-match linear drafts, while cached top-$k$ candidates provide a fallback logits-cache tree.
 
 \subsection{Prefill Reuse with Filter-Layer Correction}
@@ -473,9 +473,9 @@ Figure~\ref{fig:ablation-filter-layer} evaluates filter-layer placement in MAReu
 \subsubsection{Decoding Components}
 Figure~\ref{fig:ablation-components} shows that the logits-cache tree is the foundation of MAReuse-D: removing it causes the largest drop, from 130.69 to 72.42 tokens/s and from 4.384 to 2.19 MAT, because it preserves draft coverage when retrieval is weak. The local and role-aware global indexes are also indispensable: removing them lowers throughput to 105.71 and 122.33 tokens/s, respectively. These results show that local cross-agent reuse and global role-aware reuse complement each other, jointly forming an integrated draft mechanism with the logits-cache tree.
 
-\section{Conclusion}
 
-Overall, the results show that multi-agent inference contains exploitable redundancy beyond repeated prompt prefixes. By correcting reused KV states during prefill and turning agent histories into verifiable drafts during decoding, MAReuse converts both shared context and recurring generation patterns into practical acceleration opportunities. Across tasks, these gains indicate that reuse can accelerate the inference pipeline while preserving quality in most settings.
+\section{Conclusion}
+We present MAReuse, a computation-reuse framework that accelerates multi-agent LLM inference via filter-layer corrected prefill and collaborative speculative decoding. Experiments show that MAReuse achieves substantial speedups in both TTFT and throughput while maintaining accuracy. Currently, our evaluation is limited to 7B/8B models. Future work will test MAReuse on larger foundation models (e.g., 14B/32B) to verify its scalability and performance at scale.
 
 \bibliography{aaai2027}
 
