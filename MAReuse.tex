@@ -231,13 +231,28 @@ We set $\mathcal L$ to all model layers and report the evaluation results in Fig
 \end{figure}
 
 \subsection{Collaborative Speculative Decoding}
-At each decoding step, MAReuse first queries the local SAM, then the role-aware global index if no valid local continuation is found, and finally the logits-cache tree if neither exact-match retriever provides a draft. The resulting linear or tree-structured draft is verified by the target model in a single forward pass.
+Multi-agent workflows provide a hierarchy of reusable generation signals. Agents working on the same sample often repeat or extend their collaborators' outputs, while agents assigned the same role exhibit recurring patterns across samples. Even when no exact continuation is available, previously verified target-model logits still provide reusable token-level predictions.
+MAReuse organizes these signals into a \emph{collaborative draft cascade} that moves from context-specific sequence reuse to broader token-level reuse. 
+At each decoding step, it queries an in-sample local index, a role-aware global index after a local miss, and finally a logits-cache tree if neither exact-match retriever provides a draft. The resulting linear or tree-structured draft is verified by the target model in a single forward pass.
 
-\subsubsection{Local Retrieval with Dynamic Suffix Automaton}
 
-Motivated by \textbf{Observation 2}, MAReuse uses a dynamic suffix automaton (SAM) as its \textbf{local index} to retrieve long exact spans from token histories generated or verified within the current sample~\citep{DBLP:journals/tcs/BlumerBHECS85}. SAM compactly indexes all substrings of these histories.
 
-SAM is initialized empty at the start of each sample and released after the sample finishes, restricting the local index to current-sample histories. At each speculative decoding step, MAReuse queries SAM for the longest in-sample suffix match and uses the following tokens as a linear draft; after verification, the accepted tokens are inserted back into SAM. This dynamic-anchor design avoids committing to a fixed anchor length: short fixed anchors are easy to match but weakly constrained, while long fixed anchors impose strict matching requirements and may miss reuse opportunities. As shown in Table~\ref{tab:local-sam-ablation}, dynamic matching outperforms fixed $n$-gram anchors in throughput and mean accepted tokens (MAT).
+% \subsubsection{Local Retrieval with Dynamic Suffix Automaton}
+\subsubsection{In-Sample Cross-Agent Drafting}
+Motivated by \textbf{Observation 2}, MAReuse uses a dynamic suffix automaton (SAM) as its \textbf{local index}~\citep{DBLP:journals/tcs/BlumerBHECS85}. The index contains token histories generated or verified within the current sample, allowing an agent to reuse continuations previously produced by its collaborators. SAM is initialized empty at the start of each sample and released after the sample finishes.
+
+% Motivated by \textbf{Observation 2}, MAReuse uses a dynamic suffix automaton (SAM) as its \textbf{local index} to retrieve long exact spans from token histories generated or verified within the current sample~\citep{DBLP:journals/tcs/BlumerBHECS85}. SAM compactly indexes all substrings of these histories.
+
+
+
+Given the current generation prefix, MAReuse finds its longest suffix that also occurs in the local history and uses the tokens following the matched occurrence as a linear draft. The matched suffix therefore serves as a dynamic anchor whose length is determined by the available history. 
+This differs from fixed $n$-gram retrieval, which requires the anchor length to be specified in advance. Short anchors are easier to match but provide weaker contextual constraints, while long anchors are more specific but more likely to miss reusable continuations. By adapting the anchor length to each decoding context, the local SAM balances match coverage and continuation relevance. 
+After target-model verification, accepted tokens are inserted back into the local index, allowing reuse opportunities to accumulate as the multi-agent workflow progresses. As shown in Table~\ref{tab:local-sam-ablation}, the dynamic local SAM improves both throughput and mean accepted tokens over fixed $n$-gram anchors.
+
+
+
+
+% SAM is initialized empty at the start of each sample and released after the sample finishes, restricting the local index to current-sample histories. At each speculative decoding step, MAReuse queries SAM for the longest in-sample suffix match and uses the following tokens as a linear draft; after verification, the accepted tokens are inserted back into SAM. This dynamic-anchor design avoids committing to a fixed anchor length: short fixed anchors are easy to match but weakly constrained, while long fixed anchors impose strict matching requirements and may miss reuse opportunities. As shown in Table~\ref{tab:local-sam-ablation}, dynamic matching outperforms fixed $n$-gram anchors in throughput and mean accepted tokens (MAT).
 
 \begin{table}[!t]
 \centering
@@ -256,21 +271,40 @@ Fixed 16-gram & 117.42 & 3.89 \\
 \caption{Local retriever ablation on GSM8K. Local SAM outperforms fixed local $n$-gram anchors.}
 \label{tab:local-sam-ablation}
 \end{table}
-\subsubsection{Role-Aware Global Retrieval}
+% \subsubsection{Role-Aware Global Retrieval}
+\subsubsection{Cross-Sample Role-Aware Drafting}
+A local miss does not imply that no reusable continuation exists. \textbf{Observation 3} shows that outputs from the same agent role contain substantially stronger cross-sample reuse opportunities than outputs from different roles. For example, planner or reviewer agents often follow recurring structures even when they operate on different inputs.
 
-Motivated by \textbf{Observation 3}, MAReuse queries a role-aware global index after a local miss. The \textbf{global index} uses a hash table whose key consists of the role, anchor length, and exact anchor tokens. The corresponding value is a bounded list of range indices rather than duplicated continuation tokens. For each completed sample, its outputs are partitioned by agent roles and indexed using three fixed anchor lengths. During retrieval, MAReuse tries longer anchors first, and selects the optimal range index from the matched list based on its historical hit counts and status of recent updates. We provide a optional TTL-based pruning mechanism for memory control. Each anchor records its last query access, and periodic pruning removes anchors that remain inactive beyond a configurable window; both the inactivity threshold and pruning interval are adjustable. Further details of the local and global indexes are provided in the supplementary material.
+MAReuse therefore queries a role-aware \textbf{global index} after a local miss. The index uses a hash table whose key consists of the agent role, anchor length, and exact anchor tokens. Its value is a bounded list of range indices pointing to continuations in previously stored outputs, avoiding duplication of the continuation tokens themselves. Completed outputs are partitioned and indexed by agent role. During retrieval, MAReuse tries longer anchors first and selects a matched range according to its historical hit count and recent-update status. The tokens following the selected range form a linear draft.
+The global index thus complements the local index by extending exact continuation reuse from in-sample cross-agent histories to cross-sample same-role histories.
+Further details of the local and global indexes are provided in the supplementary material.
 
-\subsubsection{Logits-Cache Tree Fallback}
 
-MAReuse first uses exact-match linear drafts from local or global histories to reuse long token spans. When no such draft is available, it falls back to a logits-cache tree. The tree captures a discrete approximation of the target model's local next-token distribution by branching over cached top-$k$ predictions. It therefore requires no long history match and covers multiple plausible continuations in one verification pass. As shown in Figure~\ref{fig:tree-draft}, the cache maps each verified token ID to its top-$k$ next-token IDs. Starting from the current token, MAReuse fills a fixed tree template with the cached successors of each node token at the corresponding child positions. It then derives the tree attention mask and position IDs for parallel verification. Posterior verification then selects an accepted root-to-leaf path. MAReuse also provides an optional pruning scheme that retains nodes frequently covered by target-model-verified paths from early samples and freezes the resulting compact template for subsequent samples.
-
-Overall, MAReuse integrates current-sample histories, same-role outputs, and cached next-token candidates as draft sources for collaborative speculative decoding.
 \begin{figure}[t]
     \centering
     \includegraphics[width=\columnwidth]{"Figures/tree draft.pdf"}
-    \caption{Logits‑cache draft tree construction and specialization. The tree is built from cached logits and can be pruned based on verified paths from early samples.}
+    \caption{Logits-cache draft tree construction and specialization. The tree is built from cached logits and can be pruned based on verified paths from early samples.}
     \label{fig:tree-draft}
 \end{figure}
+
+% Motivated by \textbf{Observation 3}, MAReuse queries a role-aware global index after a local miss. The \textbf{global index} uses a hash table whose key consists of the role, anchor length, and exact anchor tokens. The corresponding value is a bounded list of range indices rather than duplicated continuation tokens. For each completed sample, its outputs are partitioned by agent roles and indexed using three fixed anchor lengths. During retrieval, MAReuse tries longer anchors first, and selects the optimal range index from the matched list based on its historical hit counts and status of recent updates. We provide a optional TTL-based pruning mechanism for memory control. Each anchor records its last query access, and periodic pruning removes anchors that remain inactive beyond a configurable window; both the inactivity threshold and pruning interval are adjustable. Further details of the local and global indexes are provided in the supplementary material.
+
+\subsubsection{Token-Level Logits-Cache Tree Fallback}
+Exact-history retrieval provides long drafts but requires a match with a previously observed sequence. When both exact retrievers miss, MAReuse falls back to a logits-cache tree. This fallback lowers the reuse granularity from complete sequences to token-level transitions, providing draft coverage even without a long history match.
+
+Whenever the target model verifies a token, MAReuse caches its top-$k$ next-token candidates. Starting from the current token, cached successors are recursively placed into a fixed tree template, where each root-to-leaf path represents a possible continuation. MAReuse constructs the corresponding tree attention mask and position IDs to verify all candidate paths in parallel, after which posterior verification selects an accepted path. As illustrated in Figure~\ref{fig}, the template can optionally be specialized using paths frequently verified during early samples.
+
+
+
+% MAReuse first uses exact-match linear drafts from local or global histories to reuse long token spans. When no such draft is available, it falls back to a logits-cache tree. The tree captures a discrete approximation of the target model's local next-token distribution by branching over cached top-$k$ predictions. It therefore requires no long history match and covers multiple plausible continuations in one verification pass. As shown in Figure~\ref{fig:tree-draft}, the cache maps each verified token ID to its top-$k$ next-token IDs. Starting from the current token, MAReuse fills a fixed tree template with the cached successors of each node token at the corresponding child positions. It then derives the tree attention mask and position IDs for parallel verification. Posterior verification then selects an accepted root-to-leaf path. MAReuse also provides an optional pruning scheme that retains nodes frequently covered by target-model-verified paths from early samples and freezes the resulting compact template for subsequent samples.
+
+% Overall, MAReuse integrates current-sample histories, same-role outputs, and cached next-token candidates as draft sources for collaborative speculative decoding.
+
+Overall, MAReuse integrates three complementary draft sources. Current-sample histories provide the most context-specific exact continuations; same-role histories extend exact reuse across samples; and cached logits maintain token-level draft coverage when exact matching fails. 
+% Through this online reuse cycle, the same collaboration originally introduced to improve reasoning quality also provides reusable computation for accelerating subsequent generation.
+
+
+
 
 
 \begin{figure*}[t]
