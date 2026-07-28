@@ -291,7 +291,7 @@ Further details of the local and global indexes are provided in the supplementar
 \subsubsection{Token-Level Logits-Cache Tree Fallback}
 Exact-history retrieval provides long drafts but requires a match with a previously observed sequence. When both exact retrievers miss, MAReuse falls back to a logits-cache tree. This fallback lowers the reuse granularity from complete sequences to token-level transitions, providing draft coverage even without a long history match.
 
-Whenever the target model verifies a token, MAReuse caches its top-$k$ next-token candidates. Starting from the current token, cached successors are recursively placed into a fixed tree template, where each root-to-leaf path represents a possible continuation. MAReuse constructs the corresponding tree attention mask and position IDs to verify all candidate paths in parallel, after which posterior verification selects an accepted path. As illustrated in Figure~\ref{fig}, the template can optionally be specialized using paths frequently verified during early samples.
+Whenever the target model verifies a token, MAReuse caches its top-$k$ next-token candidates. Starting from the current token, cached successors are recursively placed into a fixed tree template, where each root-to-leaf path represents a possible continuation. MAReuse constructs the corresponding tree attention mask and position IDs to verify all candidate paths in parallel, after which posterior verification selects an accepted path. As illustrated in Figure~\ref{fig:tree-draft}, the template can optionally be specialized using paths frequently verified during early samples.
 
 
 
