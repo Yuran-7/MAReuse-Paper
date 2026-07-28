@@ -221,7 +221,7 @@ We evaluate candidate filter layers offline using their reduction in KV deviatio
 		{\sum_{\ell\in\mathcal L}G_\ell^{(0)}}.
 	\end{aligned}
 \end{equation}
-We set $\mathcal L$ to all model layers and report the evaluation results in Figure~\ref{fig:filter-layer-sweep}; $G_\ell^{(0)}$ is the concatenation-only baseline, and the dashed line shows layer-1 correction. Choosing $f$ balances signal reliability and correction depth: a shallow $f$ may miss tokens with large later-layer deviations, whereas a deep $f$ leaves fewer layers to benefit from correction. We select $f$ offline by maximizing deviation reduction and fix it for inference.
+We set $\mathcal L$ to all model layers and report the evaluation results in Figure~\ref{fig:filter-layer-sweep}; $G_\ell^{(0)}$ is the concatenation-only baseline, and the dashed line shows layer-1 correction. Choosing $f$ trades off token-selection reliability against correction depth: a shallow filter layer may overlook tokens whose deviations emerge later, whereas a deep one leaves fewer subsequent layers for correction. We select $f$ offline by maximizing deviation reduction and fix it for inference.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{Figures/layer_sweep_v.pdf}
@@ -256,7 +256,7 @@ Fixed 16-gram & 117.42 & 3.89 \\
 \end{table}
 \subsubsection{Role-Aware Global Retrieval}
 
-Motivated by \textbf{Observation 3}, MAReuse queries a role-aware global index after a local miss. The \textbf{global index} uses a hash table whose key consists of the role, anchor length, and exact anchor tokens. Each hash key maps to a bounded list of source-span references rather than duplicated continuation tokens. Outputs from completed samples are enumerated with three fixed anchor lengths and committed to their role-specific partitions. During retrieval, MAReuse tries longer anchors first and selects a referenced continuation using lightweight evidence such as historical hits, recency, and continuation length. We provide a TTL-based pruning mechanism for memory control. Each anchor records its last query access, and periodic pruning removes anchors that remain inactive beyond a configurable window; both the inactivity threshold and pruning interval are adjustable. Further details of the local and global indexes are provided in the supplementary material.
+Motivated by \textbf{Observation 3}, MAReuse queries a role-aware global index after a local miss. The \textbf{global index} uses a hash table whose key consists of the role, anchor length, and exact anchor tokens. Each hash key maps to a bounded list of source-span references rather than duplicated continuation tokens. Outputs from completed samples are enumerated with three fixed anchor lengths and committed to their role-specific partitions. During retrieval, MAReuse tries longer anchors first and selects a referenced continuation using lightweight evidence such as historical hits, recency, and continuation length. We provide a optional TTL-based pruning mechanism for memory control. Each anchor records its last query access, and periodic pruning removes anchors that remain inactive beyond a configurable window; both the inactivity threshold and pruning interval are adjustable. Further details of the local and global indexes are provided in the supplementary material.
 
 \subsubsection{Logits-Cache Tree Fallback}
 
@@ -264,7 +264,7 @@ Motivated by \textbf{Observation 3}, MAReuse queries a role-aware global index a
 %
 %We also provide optional pruning to control the logits-cache tree size. Tree size determines how many candidate branches one verification step can cover: larger trees may increase MAT but also raise the cost of each verification forward. MAReuse starts with a large template, records target-model-verified paths from early samples, and greedily retains nodes covering frequent historical paths. The resulting smaller template is kept fixed for subsequent samples.
 
-MAReuse first uses exact-match linear drafts from local or global histories to reuse long token spans. When no such draft is available, it falls back to a logits-cache tree. The tree captures a discrete approximation of the target model's local next-token distribution by branching over cached top-$k$ predictions. It therefore requires no long history match and covers multiple plausible continuations in one verification pass. As shown in Figure~\ref{fig:tree-draft}, the cache maps each verified token ID to its top-$k$ next-token IDs. Starting from the current token, MAReuse fills a fixed tree template with the cached successors of each node token at the corresponding child positions. It then derives the tree attention mask and position IDs for parallel verification. Posterior verification then selects an accepted root-to-leaf path. MAReuse also provides an optional pruning scheme that retains nodes frequently covered by target-model-verified paths from early samples and freezes the resulting compact template for subsequent samples.
+MAReuse first uses exact-match linear drafts from local or global histories to reuse long token spans. When no such draft is available, it falls back to a logits-cache tree. The tree captures a discrete approximation of the target model's local next-token distribution by branching over cached top-$k$ predictions. It therefore requires no long history match and covers multiple plausible continuations in one verification pass. As shown in Figure~\ref{fig:tree-draft}, the cache maps each verified token ID to its top-$k$ next-token IDs. Starting from the current token, MAReuse populates a fixed tree template by placing each node's cached top-$k$ successor candidates into its predefined child slots. It then derives the tree attention mask and position IDs for parallel verification. Posterior verification accepts tokens along at most one path from the root, and may terminate before reaching a leaf. MAReuse also provides an optional pruning scheme that retains nodes frequently covered by target-model-verified paths from early samples and freezes the resulting compact template for subsequent samples.
 
 Overall, MAReuse integrates current-sample histories, same-role outputs, and cached next-token candidates as draft sources for collaborative speculative decoding.
 \begin{figure}[t]
@@ -297,7 +297,7 @@ For prefill reuse, we report task accuracy and time to first token (TTFT), where
 
 %We provide detailed hyperparameters—including recomputation ratios, filter‑layer choices, retrieval anchors, draft budgets, and tree configurations—as well as supplementary experiments, in the supplemental document.
 
-The supplementary material provides detailed parameter settings for MAReuse and all baselines, together with additional experimental analyses (filter-layer evaluations on Qwen-family models, a runtime breakdown of MAReuse-D, etc.).
+The supplementary material provides detailed parameter settings for MAReuse and all baselines, together with additional experimental analyses (filter-layer evaluations on Qwen models, a runtime breakdown of MAReuse-D, etc.).
 
 \subsection{Main Results}
 
