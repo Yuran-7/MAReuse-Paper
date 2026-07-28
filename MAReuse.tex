@@ -87,7 +87,6 @@ We model a multi-agent inference workflow as a directed acyclic graph $G=(V,E)$.
 	P_v = a_0 \cdot z_1 \cdot a_1 \cdot \ldots \cdot z_m \cdot a_m,
 	\label{eq:prompt-decomposition}
 \end{equation}
-
 where $\cdot$ denotes concatenation of prompt segments, $a_i$ denotes  fixed role instructions, few-shot examples, or template text, and $z_i$ denotes dynamic content such as the user question, predecessor outputs, or auxiliary conditions. Since node outputs are inserted into successor prompts, previously processed text is repeatedly encoded by downstream nodes. For a chain of $M$ calls whose accumulated context grows by an average of $L$ tokens per call, the total prefill token-processing volume is approximately $O(\sum_{i=1}^{M}iL)=O(M^2L)$~\citep{DBLP:journals/corr/abs-2510-12872}. If each call generates an average of $Y$ tokens, the workflow also performs $O(MY)$ autoregressive decoding steps. Although this cost grows only linearly, decoding remains a major latency bottleneck because token generation is inherently sequential.
 
 \subsection{Observation 1: First-Layer Token Selection Poorly Predicts Later-Layer Deviations}
