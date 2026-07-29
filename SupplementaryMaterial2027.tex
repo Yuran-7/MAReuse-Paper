@@ -257,6 +257,10 @@ This section describes the experimental setting used for the main results, inclu
 
 All experiments are run on a server equipped with an Intel(R) Xeon(R) Platinum 8470Q CPU and a single NVIDIA GeForce RTX 4090 GPU. Model inference uses bfloat16 (bf16) precision on the GPU, with the same runtime precision and serving configuration applied to all methods. The software stack is PyTorch 2.11.0 with the CUDA 13.0 runtime and Transformers 4.50.2. In Transformers, we set the decoding temperature to 0 and use greedy decoding unless otherwise stated. All latency and throughput measurements use batch size 1. We use CUDA synchronization before and after timing.
 
+\subsection{Dataset Sampling}
+
+Following the evaluation protocol of KVCOMM~\citep{DBLP:journals/corr/abs-2510-12872}, we randomly sample evaluation instances from the original benchmark datasets to keep the exhaustive multi-agent evaluation across methods and workflow widths computationally manageable. Specifically, we sample 659 examples from the GSM8K test set, 153 questions from the MMLU test set, and 161 tasks from the HumanEval test set. Sampling is performed once before running the experiments and without replacement. We use the same fixed subset and evaluation order for every method and workflow width, so all reported comparisons are paired on identical inputs and no method-specific resampling is performed.
+
 \subsection{Repetition and Measurement Variability}
 
 All methods use greedy decoding with temperature 0, fixed prompts, and a fixed evaluation order. Across repeated executions, we empirically observe identical predictions and accuracy for each configuration, resulting in no observed run-to-run accuracy variation under our setup. This observation is empirical rather than a general guarantee of bitwise determinism, as discussed in Section~C.4.

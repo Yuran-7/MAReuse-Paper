@@ -29,7 +29,7 @@
 \maketitle
 
 \begin{abstract}
-Multi-agent large language model (LLM) systems improve complex problem solving through role specialization and coordinated workflows. In multi-agent workflows, agents collaborating on the same task often process overlapping contexts. This overlap leads to substantial redundant computation and inference latency: prefill repeatedly recomputes KV caches for shared context, while decoding generates similar token sequences autoregressively. Existing computation reuse techniques have two key limitations. KV cache reuse methods for prefill selectively recompute a small subset of tokens based on KV deviations observed at the first LLM's layer, which poorly predict errors in later layers. Meanwhile, decoding-stage reuse across agents remains largely underexplored. We propose \textbf{MAReuse}, a computation reuse framework for multi-agent LLM inference that exploits structured redundancy across prefill and decoding. During prefill, MAReuse not only performs an initial token selection based on first-layer KV deviations but also re-selects critical token positions at an intermediate filter layer, so that the selected positions better capture KV errors in later layers. During decoding, MAReuse performs collaborative speculative decoding using exact history matches and a fallback logits-cache tree, enabling multiple draft tokens to be verified in a single forward pass. We evaluate on three diverse public benchmarks. While maintaining comparable accuracy, MAReuse delivers the lowest prefill and decoding latency among the evaluated KV cache reuse and speculative decoding baselines, respectively. Compared with standard multi-agent inference, MAReuse achieves up to 2.7$\times$ prefill speedup and 3.2$\times$ decoding speedup.
+Multi-agent large language model (LLM) systems improve complex problem solving through role specialization and coordinated workflows. In multi-agent workflows, agents collaborating on the same task often process overlapping contexts. This overlap leads to substantial redundant computation and inference latency: prefill repeatedly recomputes KV caches for shared context, while decoding generates similar token sequences autoregressively. Existing computation reuse techniques have two key limitations. KV cache reuse methods for prefill selectively recompute a small subset of tokens based on KV deviations observed at the LLM's first layer, which poorly predict errors in later layers. Meanwhile, decoding-stage reuse across agents remains largely underexplored. We propose \textbf{MAReuse}, a computation reuse framework for multi-agent LLM inference that exploits structured redundancy across prefill and decoding. During prefill, MAReuse not only performs an initial token selection based on first-layer KV deviations but also re-selects critical token positions at an intermediate filter layer, so that the selected positions better capture KV errors in later layers. During decoding, MAReuse performs collaborative speculative decoding using exact history matches and a fallback logits-cache tree, enabling multiple draft tokens to be verified in a single forward pass. We evaluate on three diverse public benchmarks. While maintaining comparable accuracy, MAReuse delivers the lowest prefill and decoding latency among the evaluated KV cache reuse and speculative decoding baselines, respectively. Compared with standard multi-agent inference, MAReuse achieves up to 2.7$\times$ prefill speedup and 3.2$\times$ decoding speedup.
 \end{abstract}
 
 \section{Introduction}
@@ -52,7 +52,7 @@ The contributions of this work are summarized as follows:
 	
 	\item We introduce filter-layer corrected KV reuse for prefill and collaborative speculative decoding for generation, exploiting the distinct reuse opportunities in the two stages. 
 	
-	\item Extensive experiments across three datasets and multiple workflow widths demonstrate that MAReuse achieves average speedups of 2.00$\times$ in TTFT and 2.57$\times$ in decoding, while largely preserving task accuracy.
+	\item Extensive experiments across three datasets and multiple workflow widths demonstrate that MAReuse achieves average speedups of 2.00$\times$ in prefill and 2.57$\times$ in decoding, while largely preserving task accuracy.
 	
 %	\item We develop filter-layer corrected prefill reuse to accelerate prefill and collaborative speculative decoding to accelerate decoding, addressing the distinct reuse opportunities in the two stages.
 %	
@@ -89,10 +89,10 @@ We model a multi-agent inference workflow as a directed acyclic graph $G=(V,E)$.
 \end{equation}
 where $\cdot$ denotes concatenation of prompt segments, $a_i$ denotes  fixed role instructions, few-shot examples, or template text, and $z_i$ denotes dynamic content such as the user question, predecessor outputs, or auxiliary conditions. Since node outputs are inserted into successor prompts, previously processed text is repeatedly encoded by downstream nodes. For a chain of $M$ calls whose accumulated context grows by an average of $L$ tokens per call, the total prefill token-processing volume is approximately $O(\sum_{i=1}^{M}iL)=O(M^2L)$~\citep{DBLP:journals/corr/abs-2510-12872}. If each call generates an average of $Y$ tokens, the workflow also performs $O(MY)$ autoregressive decoding steps. Although this cost grows only linearly, decoding remains a major latency bottleneck because token generation is inherently sequential.
 
-\subsection{Observation 1: First-Layer Token Selection Poorly Predicts Later-Layer Deviations}
+\subsection{Observation 1: Layer-1 Token Selection Poorly Predicts Later-Layer Deviations}
 %We observe that tokens with the largest KV deviations change substantially across layers, making first-layer token selection an unreliable proxy for later-layer errors.
 
-As discussed above, the same output can have different KV states under different prefixes, making direct KV cache reuse across agents inaccurate. Selectively recomputing the KV state of a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens according to their K or V deviations at the first comparison layer of LLMs and uses the resulting fixed token set for recomputation in all subsequent layers. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
+As discussed above, the same output can have different KV states under different prefixes, making direct KV cache reuse across agents inaccurate. Selectively recomputing the KV state of a few influential tokens can reduce deviations from full-prefill KV states and better recover attention across prompt segments. A representative token selection method is CacheBlend \citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, which ranks reused tokens according to their K or V deviations at the first comparison layer of the LLM and uses the resulting fixed token set for recomputation in all subsequent layers. For a comparison layer $\ell$ (with layers indexed from 0), let $\tilde V_i^\ell$ denote the value state obtained by direct cache concatenation without token recomputation, and let $V_i^\ell$ denote the exact value state under the current full prompt. We use value deviation to define the selected set:
 \begin{equation}
 \mathcal S_\ell =
 \operatorname{Top}_{\rho}
@@ -119,7 +119,7 @@ $\operatorname{Jaccard}(\mathcal S_{16},\mathcal S_f)$ & 0.6944 & 0.7569 & 1.000
 \label{tab:layer-drift}
 \end{table}
 As shown in Table~\ref{tab:layer-drift}, the overlap between $\mathcal S_1$ and later-layer selections falls to 0.4926 at layer 24, whereas $\mathcal S_{16}$ retains a much higher overlap of 0.8971. 
-This indicates that first-layer deviations are not reliable proxies for deep-layer errors, motivating token re-selection at an intermediate layer.
+This indicates that layer-1 deviations are not reliable proxies for deep-layer errors, motivating token re-selection at an intermediate layer.
 
 
 \subsection{Observation 2: Multi-Agent Outputs Exhibit Long Exact-Match Spans}
@@ -157,7 +157,7 @@ The coverage by spans of length at least $k$ is
 	\label{tab:coverage}
 \end{table}
 
-This metric measures how much of the output token sequence is covered by long exact spans from the candidate source. Table~\ref{tab:coverage} compares multi-agent outputs on GSM8K~\citep{DBLP:journals/corr/abs-2110-14168} with Spec-Bench~\citep{DBLP:conf/acl/XiaYDW00L0S24}, a speculative decoding dataset that simulates single-agent generation. Multi-agent outputs exhibit markedly stronger long-span reuse: $\mathrm{Coverage}_{\ge16}$ increases from 5.2\% to 17.8\%, while the average longest match grows from 13.6 to 38.8 tokens. Moreover, reuse opportunities increase consistently with workflow width, with $\mathrm{Coverage}_{\ge16}$ reaching 12.0\%, 18.2\%, and 21.1\% for workflows involving 3, 4, and 5 agents, respectively.
+This metric measures how much of the output token sequence is covered by long exact spans from the candidate source. Table~\ref{tab:coverage} compares the reuse statistics of multi-agent outputs on GSM8K~\citep{DBLP:journals/corr/abs-2110-14168} with those of Spec-Bench~\citep{DBLP:conf/acl/XiaYDW00L0S24}, a speculative decoding dataset that simulates single-agent generation. The multi-agent statistics are averaged over agent counts of 2--5. Multi-agent outputs exhibit markedly stronger long-span reuse: $\mathrm{Coverage}_{\ge16}$ increases from 5.2\% to 17.8\%, while the average longest match grows from 13.6 to 38.8 tokens. Moreover, reuse opportunities increase consistently with workflow width, with $\mathrm{Coverage}_{\ge16}$ reaching 12.0\%, 18.2\%, and 21.1\% for workflows involving 3, 4, and 5 agents, respectively.
 
 \subsection{Observation 3: Same-Role Histories Contain Cross-Sample Reuse Opportunities}
 
@@ -203,7 +203,7 @@ During multi-agent execution, MAReuse collects reusable artifacts from agent out
 
 \subsection{Prefill Reuse with Filter-Layer Correction}
 
-To construct node $v$'s prompt, MAReuse retrieves the required token IDs and KV caches from reusable memory, concatenates them in prompt order, and realigns each segment by adjusting its RoPE rotations. It then selects a token subset for recomputation under the assembled prompt. However, \textbf{Observation 1} shows that selecting this subset only from the layer-1 deviations, as in CacheBlend~\citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, may miss tokens important at later layers.
+To construct node $v$'s prompt, MAReuse retrieves the required token IDs and KV caches from reusable memory, concatenates them in prompt order, and realigns each segment by adjusting its RoPE rotations. It then selects a token subset for recomputation under the assembled prompt. However, \textbf{Observation 1} shows that selecting this subset based only from the layer-1 deviations, as in CacheBlend~\citep{DBLP:conf/eurosys/YaoLLRCZD0J25}, may miss tokens important at later layers.
 
 MAReuse addresses this issue with filter-layer correction. A straightforward approach is to choose a filter layer $f$, fully recompute all tokens at every preceding layer, and then select tokens at layer $f$. To avoid this cost, MAReuse additionally records the auxiliary hidden states required at layer $f-1$ when a reusable segment is first produced.
 
@@ -276,14 +276,14 @@ Fixed 8-gram & 124.47 & 4.21 \\
 Fixed 16-gram & 117.42 & 3.89 \\
 \hline
 \end{tabular}
-\caption{Local retriever ablation on GSM8K. Local SAM outperforms fixed local $n$-gram anchors.}
+\caption{Local retriever ablation on GSM8K 5A. Local SAM outperforms fixed local $n$-gram anchors.}
 \label{tab:local-sam-ablation}
 \end{table}
 % \subsubsection{Role-Aware Global Retrieval}
 \subsubsection{Cross-Sample Role-Aware Drafting}
 A local miss does not imply that no reusable continuation exists. \textbf{Observation 3} shows that same-role outputs contain substantial cross-sample reuse opportunities. For example, planner or reviewer agents often follow recurring structures even when they operate on different inputs.
 
-MAReuse therefore queries a role-aware \textbf{global index} after a local miss. The index uses a hash table whose key consists of the agent role, anchor length, and exact anchor tokens. Its value is a bounded list of range indices pointing to continuations in previously stored outputs, avoiding duplication of the continuation tokens themselves. Completed outputs are partitioned and indexed by agent role. During retrieval, MAReuse tries longer anchors first and selects a matched range according to its historical hit count and recent-update status. The tokens following the selected range form a linear draft.
+MAReuse therefore queries a role-aware \textbf{global index} after a local miss. The index is a hash table with key tuple $(\text{role},\text{anchor length},\text{anchor tokens})$ and a bounded list of range tuples $(\text{output ID},\text{start},\text{end})$ as its value, avoiding duplication of continuation tokens. Completed outputs are partitioned by agent role before being inserted into the index. During retrieval, MAReuse tries longer anchors first and selects a matched range according to its historical hit count and recent-update status. The tokens following the selected range form a linear draft.
 The global index thus complements the local index by extending exact continuation reuse from in-sample cross-agent histories to cross-sample same-role histories.
 Further details of the local and global indexes are provided in the supplementary material.
 
@@ -351,7 +351,7 @@ For prefill reuse, we report task accuracy and time to first token (TTFT), where
 
 %We provide detailed hyperparameters—including recomputation ratios, filter‑layer choices, retrieval anchors, draft budgets, and tree configurations—as well as supplementary experiments, in the supplemental document.
 
- Experiments are implemented with PyTorch 2.11.0 and Transformers 4.50.2 and conducted on an NVIDIA GeForce RTX 4090 GPU. Unless otherwise stated, all methods use the same multi-agent workflow and greedy decoding. The supplementary material provides detailed parameter settings for MAReuse and all baselines, together with additional analyses, including filter-layer evaluations on Qwen models, a runtime breakdown of MAReuse-D, etc.
+ Experiments are implemented with PyTorch 2.11.0 and Transformers 4.50.2 and conducted on an NVIDIA GeForce RTX 4090 GPU. Unless otherwise stated, all methods use the same multi-agent workflow and greedy decoding. The supplementary material provides detailed parameter settings for MAReuse and all baselines, together with additional analyses such as filter-layer evaluations on both Llama and Qwen models and a runtime breakdown of MAReuse-D.
 
 \subsection{Main Results}
 
@@ -420,7 +420,7 @@ For prefill reuse, we report task accuracy and time to first token (TTFT), where
 \label{tab:prefill-results}
 \end{table}
 
-Table~\ref{tab:prefill-results} and Figure~\ref{fig:prefill-ttft} jointly show the quality-latency tradeoff of prefill reuse. MAReuse-P largely preserves task accuracy with only modest drops from dense prefilling. Among the baselines, KVCOMM achieves strong accuracy, but still suffers from high TTFT because unmatched segments fall back to dense prefill, while anchor-pool matching and offset estimation introduce additional overhead. MAReuse-P reduces average per-sample TTFT by 43.6\% on average compared with KVCOMM. CacheBlend and EPIC have TTFT close to MAReuse-P and are omitted from Figure~\ref{fig:prefill-ttft} for readability. RelayCaching is also close to MAReuse-P in TTFT, suggesting that skipping correction for a few layers brings only marginal latency savings in our setting. In contrast, MAReuse-P improves accuracy over RelayCaching by 4.4 points on average.
+Table~\ref{tab:prefill-results} and Figure~\ref{fig:prefill-ttft} jointly show the quality-latency tradeoff of prefill reuse. MAReuse-P largely preserves task accuracy with only modest drops from dense prefilling. Among the baselines, KVCOMM achieves strong accuracy, but still suffers from high TTFT because unmatched segments fall back to dense prefill, while anchor-pool matching and offset estimation introduce additional overhead. MAReuse-P reduces average per-sample TTFT by 43.6\% compared with KVCOMM. CacheBlend and EPIC have TTFT close to MAReuse-P and are omitted from Figure~\ref{fig:prefill-ttft} for readability. RelayCaching is also close to MAReuse-P in TTFT, suggesting that skipping correction for a few layers brings only marginal latency savings in our setting. In contrast, MAReuse-P improves accuracy over RelayCaching by 4.4 points on average.
 
 \subsubsection{Decoding Results}
 
@@ -510,14 +510,17 @@ Table~\ref{tab:combined-results} compares the full MAReuse pipeline with the ori
 
 \subsubsection{Filter-Layer Selection}
 
+\begin{figure}[t]
+	\centering
+	\includegraphics[width=0.98\columnwidth]{Figures/ablation_filter_layer_tight.pdf}
+	\caption{Effect of filter-layer selection on GSM8K accuracy. The heatmap reports accuracy across workflow widths; the lower curve reports the average.}
+	\label{fig:ablation-filter-layer}
+\end{figure}
+
 Figure~\ref{fig:ablation-filter-layer} evaluates filter-layer placement in MAReuse-P under the same correction budget. We observe two trends. First, intermediate layers, especially layer 6, yield higher average accuracy than very shallow or very deep layers, supporting our offline filter-layer selection strategy. Second, accuracy drops faster at deeper layers as the number of agents increases, indicating that wider workflows are more sensitive to late correction.
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.98\columnwidth]{Figures/ablation_filter_layer_tight.pdf}
-\caption{Effect of filter-layer selection on GSM8K accuracy. The heatmap reports accuracy across workflow widths; the lower curve reports the average.}
-\label{fig:ablation-filter-layer}
-\end{figure}
+\subsubsection{Decoding Components}
+Figure~\ref{fig:ablation-components} shows that the logits-cache tree is the foundation of MAReuse-D: removing it causes the largest drop, from 130.69 to 72.42 tokens/s, because it preserves draft coverage when retrieval is weak. The local and global indexes are also indispensable: removing them lowers throughput to 105.71 and 122.33 tokens/s, respectively. These results show that local cross-agent reuse and global role-aware reuse are complementary, jointly forming an integrated draft mechanism with the logits-cache tree.
 
 \begin{figure}[!ht]
 \centering
@@ -526,12 +529,12 @@ Figure~\ref{fig:ablation-filter-layer} evaluates filter-layer placement in MAReu
 \label{fig:ablation-components}
 \end{figure}
 
-\subsubsection{Decoding Components}
-Figure~\ref{fig:ablation-components} shows that the logits-cache tree is the foundation of MAReuse-D: removing it causes the largest drop, from 130.69 to 72.42 tokens/s and from 4.384 to 2.19 MAT, because it preserves draft coverage when retrieval is weak. The local and role-aware global indexes are also indispensable: removing them lowers throughput to 105.71 and 122.33 tokens/s, respectively. These results show that local cross-agent reuse and global role-aware reuse complement each other, jointly forming an integrated draft mechanism with the logits-cache tree.
+
 
 
 \section{Conclusion}
-We present MAReuse, a computation-reuse framework that accelerates multi-agent LLM inference via filter-layer corrected prefill and collaborative speculative decoding. Experiments show that MAReuse achieves substantial speedups in both TTFT and throughput while maintaining accuracy. Currently, our evaluation is limited to 7B/8B models. Future work will test MAReuse on larger foundation models (e.g., 14B/32B) to verify its scalability and performance at scale.
+We present MAReuse, a computation-reuse framework that accelerates multi-agent LLM inference via filter-layer corrected prefill and collaborative speculative decoding. Experiments show substantial speedups in both TTFT and throughput while maintaining accuracy. 
+Our evaluation is limited to 7B/8B models. Future work will test MAReuse on larger models to verify its scalability and performance.
 
 \bibliography{aaai2027}
 
