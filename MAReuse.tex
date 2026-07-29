@@ -475,6 +475,19 @@ Table~\ref{tab:prefill-results} and Figure~\ref{fig:prefill-ttft} jointly show t
 Table~\ref{tab:decoding-results} shows that MAReuse-D achieves the highest throughput in all settings on GSM8K and HumanEval. The gain comes from reusable continuations in multi-agent collaboration: later agents often build on earlier agents' outputs, allowing MAReuse-D to accept more tokens per verification step. The local index, role-aware global index, and logits-cache tree complement each other to provide robust draft construction across different reuse opportunities. On MMLU, the gains are smaller because this question-answering benchmark offers fewer long, contiguous, linear drafts; nevertheless, MAReuse-D remains competitive with the strongest prior and faster than autoregressive decoding.
 
 \subsubsection{Combined Results}
+\begin{figure}[t]
+	\centering
+	\includegraphics[width=0.98\columnwidth]{Figures/ablation_filter_layer_tight.pdf}
+	\caption{Effect of filter-layer selection on GSM8K accuracy. The heatmap reports accuracy across workflow widths; the lower curve reports the average.}
+	\label{fig:ablation-filter-layer}
+\end{figure}
+
+\begin{figure}[!ht]
+	\centering
+	\includegraphics[width=0.98\columnwidth]{Figures/ablation_components_tight.pdf}
+	\caption{Leave-one-out ablation of MAReuse-D components on GSM8K 5A. Bars show the throughput and MAT drops after removing each component.}
+	\label{fig:ablation-components}
+\end{figure}
 
 \begin{table}[t]
 \centering
@@ -510,31 +523,19 @@ Table~\ref{tab:combined-results} compares the full MAReuse pipeline with the ori
 
 \subsubsection{Filter-Layer Selection}
 
-\begin{figure}[t]
-	\centering
-	\includegraphics[width=0.98\columnwidth]{Figures/ablation_filter_layer_tight.pdf}
-	\caption{Effect of filter-layer selection on GSM8K accuracy. The heatmap reports accuracy across workflow widths; the lower curve reports the average.}
-	\label{fig:ablation-filter-layer}
-\end{figure}
+
 
 Figure~\ref{fig:ablation-filter-layer} evaluates filter-layer placement in MAReuse-P under the same correction budget. We observe two trends. First, intermediate layers, especially layer 6, yield higher average accuracy than very shallow or very deep layers, supporting our offline filter-layer selection strategy. Second, accuracy drops faster at deeper layers as the number of agents increases, indicating that wider workflows are more sensitive to late correction.
 
 \subsubsection{Decoding Components}
 Figure~\ref{fig:ablation-components} shows that the logits-cache tree is the foundation of MAReuse-D: removing it causes the largest drop, from 130.69 to 72.42 tokens/s, because it preserves draft coverage when retrieval is weak. The local and global indexes are also indispensable: removing them lowers throughput to 105.71 and 122.33 tokens/s, respectively. These results show that local cross-agent reuse and global role-aware reuse are complementary, jointly forming an integrated draft mechanism with the logits-cache tree.
 
-\begin{figure}[!ht]
-\centering
-\includegraphics[width=0.98\columnwidth]{Figures/ablation_components_tight.pdf}
-\caption{Leave-one-out ablation of MAReuse-D components on GSM8K 5A. Bars show the throughput and MAT drops after removing each component.}
-\label{fig:ablation-components}
-\end{figure}
-
 
 
 
 \section{Conclusion}
 We present MAReuse, a computation-reuse framework that accelerates multi-agent LLM inference via filter-layer corrected prefill and collaborative speculative decoding. Experiments show substantial TTFT and throughput gains with benchmark-dependent accuracy changes. 
-Our evaluation is limited to 7B/8B models. Future work will test MAReuse on larger models to verify its scalability and performance.
+Currently, our evaluation is limited to 7B/8B models. Future work will test MAReuse on larger foundation models (e.g., 14B/32B) to verify its scalability and performance at scale. 
 
 \bibliography{aaai2027}
 
